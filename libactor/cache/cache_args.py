@@ -49,7 +49,7 @@ class CacheArgsHelper:
                 self.cache_ser_args[arg] = get_ident_obj_key
 
     @staticmethod
-    def from_actor_func(
+    def from_func(
         func: Callable,
         self_args: Optional[Callable[..., dict]] = None,
         cache_ser_args: Optional[dict[str, ArgSer]] = None,
@@ -74,10 +74,8 @@ class CacheArgsHelper:
             if name not in argtypes:
                 argtypes[name] = None
 
-        assert (
-            next(iter(args)) == "self"
-        ), "The first argument of the method must be self, an instance of BaseActor"
-        args.pop("self")
+        if next(iter(args)) == "self":
+            args.pop("self")
 
         return CacheArgsHelper(args, argtypes, self_args, cache_ser_args)
 

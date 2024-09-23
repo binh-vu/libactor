@@ -9,6 +9,8 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11"
 orjson = "^3.10.7"
+loguru = "^0.7.2"
+hugedict = "^2.14.0"
 
 
 [tool.poetry.group.dev.dependencies]

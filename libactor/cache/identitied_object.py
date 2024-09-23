@@ -5,7 +5,7 @@ from functools import cached_property
 from typing import Any, Generic, TypeGuard, Union
 from uuid import uuid4
 
-from libactor_cache.typing import T
+from libactor.typing import T
 
 
 @dataclass(slots=True)

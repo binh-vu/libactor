@@ -5,6 +5,7 @@ import gzip
 import pickle
 import weakref
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Generic, Optional, Union
 
@@ -23,8 +24,6 @@ except ImportError:
 
 
 class Backend(Generic[T], ABC):
-    sqlite: SqliteBackendFactory
-
     def __init__(
         self,
         ser: Callable[[T], bytes],
@@ -108,6 +107,8 @@ class SqliteBackend(Backend):
 class MemBackend(Backend):
 
     def __init__(self, cache_obj: Optional[dict[bytes, Any]] = None):
+        self.id2cache = {}
+        self.id2ref = {}
         self.cache_obj = cache_obj or {}
 
     @contextmanager
@@ -142,25 +143,6 @@ class MemBackend(Backend):
     def clear(self):
         self.id2cache.clear()
         self.id2ref.clear()
-
-
-class SqliteBackendFactory:
-    @staticmethod
-    def pickle(
-        actor: Actor,
-        compression: Optional[Compression] = None,
-        mem_persist: Optional[Union[MemBackend, bool]] = None,
-        filename: Optional[str] = None,
-        log_serde_time: bool | str = False,
-    ):
-        backend = SqliteBackend(
-            ser=pickle.dumps,
-            deser=pickle.loads,
-            dbdir=actor.actor_dir,
-            filename=filename,
-            compression=compression,
-        )
-        return wrap_backend(backend, mem_persist, log_serde_time)
 
 
 class LogSerdeTimeBackend(Backend):
