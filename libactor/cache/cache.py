@@ -1,61 +1,38 @@
 from __future__ import annotations
 
+import inspect
+import types
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from libactor.cache.backend import Backend
-from libactor.cache.cache_args import CacheArgsHelper
-from libactor.cache.identitied_object import is_ident_obj
+from libactor.cache.cache_args import CacheArgsHelper, get_func_type
 from libactor.misc import identity, orjson_dumps
 
 
-def cache_call(
-    backend: Backend | Callable[[Any], Backend],
-    cache_args: Optional[list[str]] = None,
-    disable: bool | Callable[[Any], bool] = False,
-):
-    if isinstance(disable, bool) and disable:
-        return identity
-
-    def wrapper_fn(func: Callable):
-        cache_args_helper = CacheArgsHelper.from_func(func)
-        if cache_args is not None:
-            cache_args_helper.keep_args(cache_args)
-
-        cache_args_helper.ensure_auto_cache_key_friendly()
-        keyfn = lambda self, *args, **kwargs: orjson_dumps(
-            cache_args_helper.get_args(self, *args, **kwargs)
-        ).decode()
-
-        backend.postinit(func, cache_args_helper)
-
-        @wraps(func)
-        def fn(self, *args, **kwargs):
-            if not isinstance(disable, bool) and disable(self):
-                return func(self, *args, **kwargs)
-
-            backend = backend_factory(self, func, cache_args_helper)
-            key = keyfn(self, *args, **kwargs)
-            if backend.has_key(key):
-                return backend.get(key)
-
-            val = func(self, *args, **kwargs)
-            backend.set(key, val)
-
-            return val
-
-        return fn
-
-    return wrapper_fn
-
-
 def cache(
-    backend: Backend,
+    backend: (
+        Backend
+        | Callable[[Callable, CacheArgsHelper], Backend]
+        | Callable[[Any, Callable, CacheArgsHelper], Backend]
+    ),
     cache_args: Optional[list[str]] = None,
-    disable: bool | Callable[[], bool] = False,
+    disable: bool = False,
+    cache_attr: str = "__cache_backends__",
 ):
-    if isinstance(disable, bool) and disable:
+    """A single cache decorator that can be used for both functions and instance methods.
+
+    Args:
+        backend: a backend constructor if the cache function is applied on an instance method, otherwise
+            it can be both backend or backend constructor. The backend constructor will be called once.
+        cache_args: a list of arguments to be used to compute cache key. If None, all arguments will be used.
+        disable: if True, the cache will be disabled.
+        cache_attr: the attribute name to store the cache backend instances (only applicable when caching methods).
+    """
+    if disable:
         return identity
+
+    backend_factory = backend
 
     def wrapper_fn(func: Callable):
         cache_args_helper = CacheArgsHelper.from_func(func)
@@ -63,26 +40,69 @@ def cache(
             cache_args_helper.keep_args(cache_args)
 
         cache_args_helper.ensure_auto_cache_key_friendly()
-        keyfn = lambda self, *args, **kwargs: orjson_dumps(
-            cache_args_helper.get_args(self, *args, **kwargs)
-        ).decode()
 
-        backend.postinit(func, cache_args_helper)
+        func_type = get_func_type(func)
+        if func_type == "function":
+            # we are caching a function
+            keyfn = lambda *args, **kwargs: orjson_dumps(
+                cache_args_helper.get_func_args(*args, **kwargs)
+            ).decode()
 
-        @wraps(func)
-        def fn(*args, **kwargs):
-            if not isinstance(disable, bool) and disable():
-                return func(*args, **kwargs)
+            if callable(backend_factory):
+                store = cast(
+                    Callable[[Callable, CacheArgsHelper], Backend], backend_factory
+                )(func, cache_args_helper)
+            else:
+                assert isinstance(backend_factory, Backend)
+                store = backend_factory
 
-            key = keyfn(*args, **kwargs)
-            if backend.has_key(key):
-                return backend.get(key)
+            @wraps(func)
+            def fn(*args, **kwargs):
+                key = keyfn(*args, **kwargs)
+                if store.has_key(key):
+                    return store.get(key)
 
-            val = func(*args, **kwargs)
-            backend.set(key, val)
+                val = func(*args, **kwargs)
+                store.set(key, val)
 
-            return val
+                return val
 
-        return fn
+            return fn
+        else:
+            assert func_type == "instancemethod"
+
+            keyfn = lambda self, *args, **kwargs: orjson_dumps(
+                cache_args_helper.get_method_args(self, *args, **kwargs)
+            ).decode()
+
+            assert callable(backend_factory) and not isinstance(
+                backend_factory, Backend
+            ), f"Backend factory must be a constructor function to create one for each instance. Got {backend_factory}"
+
+            # return a wrapper that will be called only once to setup the backend
+            @wraps(func)
+            def method(self, *args, **kwargs):
+                if cache_attr not in self.__dict__:
+                    self.__dict__[cache_attr] = {}
+
+                assert func.__qualname__ not in self.__dict__[cache_attr]
+                self.__dict__[cache_attr][func.__qualname__] = cast(
+                    Callable[[Any, Callable, CacheArgsHelper], Backend], backend_factory
+                )(self, func, cache_args_helper)
+
+                def update_method(self, *args, **kwargs):
+                    store = self.__dict__[cache_attr][func.__qualname__]
+                    key = keyfn(self, *args, **kwargs)
+                    if store.has_key(key):
+                        return store.get(key)
+
+                    val = func(self, *args, **kwargs)
+                    store.set(key, val)
+                    return val
+
+                setattr(self, func.__name__, types.MethodType(update_method, self))
+                return update_method(self, *args, **kwargs)
+
+            return method
 
     return wrapper_fn

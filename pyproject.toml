@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "libactor"
-version = "1.0.0"
+version = "1.1.0"
 description = ""
 authors = ["Binh Vu <bvu687@gmail.com>"]
 license = "MIT"
@@ -15,6 +15,7 @@ hugedict = "^2.14.0"
 
 [tool.poetry.group.dev.dependencies]
 autoflake = "^2.3.1"
+pytest = "^8.3.3"
 
 [build-system]
 requires = ["poetry-core"]

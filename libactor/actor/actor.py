@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import pickle
 from functools import cached_property
 from typing import Generic, Optional, Sequence
 
 import orjson
 
 from libactor.actor.state import ActorState
-from libactor.cache.backend import SqliteBackend
 from libactor.storage.global_storage import GlobalStorage
 from libactor.typing import P
 
@@ -47,11 +45,3 @@ class Actor(Generic[P]):
         )
         actor_dir.mkdir(exist_ok=True, parents=True)
         return actor_dir
-
-    def pickle_sqlite(self, filename: Optional[str] = None):
-        return SqliteBackend(
-            ser=pickle.dumps,
-            deser=pickle.loads,
-            dbdir=self.actor_dir,
-            filename=filename,
-        )

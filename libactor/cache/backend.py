@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Callable, Generic, Optional, Union
 
 from hugedict.sqlite import SqliteDict, SqliteDictFieldType
+from loguru import logger
+from timer import Timer
 
 from libactor.actor.actor import Actor
 from libactor.cache.cache_args import CacheArgsHelper
@@ -26,6 +28,7 @@ except ImportError:
 class Backend(Generic[T], ABC):
     def __init__(
         self,
+        func: Callable,
         ser: Callable[[T], bytes],
         deser: Callable[[bytes], T],
         compression: Optional[Compression] = None,
@@ -53,12 +56,6 @@ class Backend(Generic[T], ABC):
         self.ser = ser
         self.deser = deser
 
-    def postinit(self, func: Callable, args_helper: CacheArgsHelper):
-        if not hasattr(self, "_is_postinited"):
-            self._is_postinited = True
-        else:
-            raise RuntimeError("Backend can only be postinited once")
-
     @abstractmethod
     def has_key(self, key: str) -> bool: ...
 
@@ -72,22 +69,17 @@ class Backend(Generic[T], ABC):
 class SqliteBackend(Backend):
     def __init__(
         self,
+        func: Callable,
         ser: Callable[[Any], bytes],
         deser: Callable[[bytes], Any],
         dbdir: Path,
         filename: Optional[str] = None,
         compression: Optional[Compression] = None,
     ):
-        super().__init__(ser, deser, compression)
-        self.filename = filename
+        super().__init__(func, ser, deser, compression)
+        self.filename = filename or f"{func.__name__}.sqlite"
         self.dbdir = dbdir
-
-    def postinit(self, func: Callable, args_helper: CacheArgsHelper):
-        super().postinit(func, args_helper)
-        if self.filename is None:
-            self.filename = f"{func.__name__}.sqlite"
-
-        self.dbconn: SqliteDict = SqliteDict(
+        self.dbconn = SqliteDict(
             self.dbdir / self.filename,
             keytype=SqliteDictFieldType.bytes,
             ser_value=identity,
@@ -107,77 +99,72 @@ class SqliteBackend(Backend):
 class MemBackend(Backend):
 
     def __init__(self, cache_obj: Optional[dict[bytes, Any]] = None):
-        self.id2cache = {}
-        self.id2ref = {}
         self.cache_obj = cache_obj or {}
 
-    @contextmanager
-    def context(self, obj: HasWorkingFsTrait, *args, **kwargs):
-        """"""
-        oid = id(obj)
-        if oid not in self.id2cache:
-            self.id2cache[oid] = {}
-
-            # create a weakref
-            def cleanup(ref):
-                del self.id2cache[oid]
-                del self.id2ref[oid]
-
-            self.id2ref[oid] = weakref.ref(obj, cleanup)
-
-        self.current_id = oid
-        yield None
-
     def has_key(self, key: bytes) -> bool:
-        assert self.current_id is not None
-        return key in self.id2cache[self.current_id]
+        return key in self.cache_obj
 
     def get(self, key: bytes) -> Any:
-        assert self.current_id is not None
-        return self.id2cache[self.current_id][key]
+        return self.cache_obj[key]
 
     def set(self, key: bytes, value: Any) -> None:
-        assert self.current_id is not None
-        self.id2cache[self.current_id][key] = value
+        self.cache_obj[key] = value
 
     def clear(self):
-        self.id2cache.clear()
-        self.id2ref.clear()
+        self.cache_obj.clear()
 
 
 class LogSerdeTimeBackend(Backend):
     def __init__(self, backend: Backend, name: str = ""):
         self.backend = backend
-        self.logger: Logger = None  # type: ignore
         self.name = name + " " if len(name) > 0 else name
 
-    def postinit(self, func: Callable, args_helper: CacheArgsHelper):
-        self.backend.postinit(func, args_helper)
-        self.logger = logger
-
-    @contextmanager
-    def context(self, obj: HasWorkingFsTrait, *args, **kwargs):
-        if self.logger is None:
-            self.logger = logger.bind(name=obj.__class__.__name__)
-        with self.backend.context(obj, *args, **kwargs):
-            yield None
-
-    def has_key(self, key: bytes) -> bool:
+    def has_key(self, key: str) -> bool:
         return self.backend.has_key(key)
 
-    def get(self, key: bytes) -> Value:
+    def get(self, key: str) -> Any:
         with Timer().watch_and_report(
             f"{self.name}deserialize",
-            self.logger.debug,
+            logger.debug,
         ):
             return self.backend.get(key)
 
-    def set(self, key: bytes, value: Value) -> None:
+    def set(self, key: str, value: Any) -> None:
         with Timer().watch_and_report(
             f"{self.name}serialize",
-            self.logger.debug,
+            logger.debug,
         ):
             self.backend.set(key, value)
+
+
+class ReplicatedBackends(Backend):
+    """A composite backend that a backend (i) is a super set (key-value) of
+    its the previous backend (i-1). Accessing to this composite backend will
+    slowly build up the front backends to have the same key-value pairs as
+    the last backend.
+
+    This is useful for combining MemBackend and DiskBackend.
+    """
+
+    def __init__(self, backends: list[Backend]):
+        self.backends = backends
+
+    def has_key(self, key: str) -> bool:
+        return any(backend.has_key(key) for backend in self.backends)
+
+    def get(self, key: str) -> Any:
+        for i, backend in enumerate(self.backends):
+            if backend.has_key(key):
+                value = backend.get(key)
+                if i > 0:
+                    # replicate the value to the previous backend
+                    for j in range(i):
+                        self.backends[j].set(key, value)
+                return value
+
+    def set(self, key: str, value: Any):
+        for backend in self.backends:
+            backend.set(key, value)
 
 
 def wrap_backend(

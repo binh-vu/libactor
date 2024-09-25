@@ -140,7 +140,23 @@ class CacheArgsHelper:
                     f"Automatically generating caching key to cache a function call requires all arguments to be one of type: str, int, bool, or IdentObj or LazyIdentObj None. Found {name} with type {argtype}"
                 )
 
-    def get_args(self, obj: ActorFnTrait, *args, **kwargs) -> dict:
+    def get_func_args(self, *args, **kwargs) -> dict:
+        # TODO: improve me!
+        out = {name: value for name, value in zip(self.args, args)}
+        out.update(
+            [
+                (name, kwargs.get(name, self.args[name].default))
+                for name in self.argnames[len(args) :]
+            ]
+        )
+        if len(self.cache_args) != len(self.argnames):
+            out = {name: out[name] for name in self.cache_args}
+
+        for name, ser_fn in self.cache_ser_args.items():
+            out[name] = ser_fn(out[name])
+        return out
+
+    def get_method_args(self, obj: ActorFnTrait, *args, **kwargs) -> dict:
         # TODO: improve me!
         out = {name: value for name, value in zip(self.args, args)}
         out.update(
@@ -161,7 +177,7 @@ class CacheArgsHelper:
 
     def get_args_as_tuple(self, obj: ActorFnTrait, *args, **kwargs) -> tuple:
         # TODO: improve me!
-        return tuple(self.get_args(obj, *args, **kwargs).values())
+        return tuple(self.get_method_args(obj, *args, **kwargs).values())
 
     @staticmethod
     def gen_cache_self_args(
@@ -198,3 +214,34 @@ class CacheArgsHelper:
             return template.format(**out)
 
         return interpolate
+
+
+def get_func_type(
+    func: Callable,
+) -> Literal["instancemethod", "function", "classmethod"]:
+    args: dict[str, Parameter] = {}
+    try:
+        argtypes: dict[str, Optional[Type]] = get_type_hints(func)
+        if "return" in argtypes:
+            argtypes.pop("return")
+    except TypeError:
+        logger.error(
+            "Cannot get type hints for function {}. "
+            "If this is due to eval function, it's mean that the type is incorrect (i.e., incorrect Python's code). "
+            "For example, we have a hugedict.prelude.RocksDBDict class, which is a class built from Rust (Python's extension module), "
+            "the class is not a generic class, but we have a .pyi file that declare it as a generic class (cheating). This works fine"
+            "for pylance and mypy checker, but it will cause error when we try to get type hints because the class is not subscriptable.",
+            func,
+        )
+        raise
+    for name, param in signature(func).parameters.items():
+        args[name] = param
+        if name not in argtypes:
+            argtypes[name] = None
+
+    first_argname = next(iter(args))
+    if first_argname == "self":
+        return "instancemethod"
+    if first_argname == "cls":
+        return "classmethod"
+    return "function"

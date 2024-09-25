@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Generic, TypeGuard, Union
+from typing import Any, Generic, TypeGuard, Union, get_origin
 from uuid import uuid4
 
 from libactor.typing import T
@@ -33,7 +33,10 @@ def is_ident_obj(x: Any) -> TypeGuard[Union[IdentObj, LazyIdentObj]]:
 
 
 def is_ident_obj_cls(x: type) -> bool:
-    return issubclass(x, (IdentObj, LazyIdentObj))
+    uox = get_origin(x)
+    if uox is None:
+        uox = x
+    return issubclass(uox, (IdentObj, LazyIdentObj))
 
 
 def get_ident_obj_key(x: Union[IdentObj, LazyIdentObj]) -> str:
