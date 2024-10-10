@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import inspect
 import types
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, Callable, Optional, cast
 
 from libactor.cache.backend import Backend
 from libactor.cache.cache_args import CacheArgsHelper, get_func_type
 from libactor.misc import identity, orjson_dumps
+from libactor.typing import ArgSer
 
 
 def cache(
@@ -17,6 +18,7 @@ def cache(
         | Callable[[Any, Callable, CacheArgsHelper], Backend]
     ),
     cache_args: Optional[list[str]] = None,
+    cache_ser_args: Optional[dict[str, ArgSer]] = None,
     disable: bool = False,
     cache_attr: str = "__cache_backends__",
 ):
@@ -26,6 +28,7 @@ def cache(
         backend: a backend constructor if the cache function is applied on an instance method, otherwise
             it can be both backend or backend constructor. The backend constructor will be called once.
         cache_args: a list of arguments to be used to compute cache key. If None, all arguments will be used.
+        cache_ser_args: a dictionary of argument name to serialization function to serialize the argument.
         disable: if True, the cache will be disabled.
         cache_attr: the attribute name to store the cache backend instances (only applicable when caching methods).
     """
@@ -35,7 +38,9 @@ def cache(
     backend_factory = backend
 
     def wrapper_fn(func: Callable):
-        cache_args_helper = CacheArgsHelper.from_func(func)
+        cache_args_helper = CacheArgsHelper.from_func(
+            func, cache_ser_args=cache_ser_args
+        )
         if cache_args is not None:
             cache_args_helper.keep_args(cache_args)
 
@@ -79,19 +84,22 @@ def cache(
                 backend_factory, Backend
             ), f"Backend factory must be a constructor function to create one for each instance. Got {backend_factory}"
 
-            # return a wrapper that will be called only once to setup the backend
             @wraps(func)
             def method(self, *args, **kwargs):
                 if cache_attr not in self.__dict__:
                     self.__dict__[cache_attr] = {}
-
-                assert func.__qualname__ not in self.__dict__[cache_attr]
-                self.__dict__[cache_attr][func.__qualname__] = cast(
+                assert func.__name__ not in self.__dict__[cache_attr], (
+                    self,
+                    cache_attr,
+                    func.__name__,
+                    self.__dict__[cache_attr],
+                )
+                self.__dict__[cache_attr][func.__name__] = cast(
                     Callable[[Any, Callable, CacheArgsHelper], Backend], backend_factory
                 )(self, func, cache_args_helper)
 
                 def update_method(self, *args, **kwargs):
-                    store = self.__dict__[cache_attr][func.__qualname__]
+                    store = self.__dict__[cache_attr][func.__name__]
                     key = keyfn(self, *args, **kwargs)
                     if store.has_key(key):
                         return store.get(key)

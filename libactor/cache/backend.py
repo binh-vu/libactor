@@ -10,14 +10,13 @@ from pathlib import Path
 from typing import Any, Callable, Generic, Optional, Union
 
 from hugedict.sqlite import SqliteDict, SqliteDictFieldType
-from loguru import logger
-from timer import Timer
-
 from libactor.actor.actor import Actor
 from libactor.cache.cache_args import CacheArgsHelper
 from libactor.misc import Chain2, identity
 from libactor.storage.global_storage import GlobalStorage
 from libactor.typing import Compression, T
+from loguru import logger
+from timer import Timer
 
 try:
     import lz4.frame as lz4_frame  # type: ignore
@@ -94,6 +93,12 @@ class SqliteBackend(Backend):
 
     def set(self, key: bytes, value: Any) -> None:
         self.dbconn[key] = self.ser(value)
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return (
+            SqliteBackend,
+            (None, self.ser, self.deser, self.dbdir, self.filename, self.compression),
+        )
 
 
 class MemBackend(Backend):
