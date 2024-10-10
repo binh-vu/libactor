@@ -83,6 +83,7 @@ class SqliteBackend(Backend):
             keytype=SqliteDictFieldType.bytes,
             ser_value=identity,
             deser_value=identity,
+            timeout=30,
         )
 
     def has_key(self, key: bytes) -> bool:
