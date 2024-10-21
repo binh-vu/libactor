@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from inspect import Parameter, signature
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -108,23 +109,23 @@ class CacheArgsHelper:
             origin = get_origin(argtype)
             if origin is None:
                 if (
-                    not issubclass(argtype, (str, int, bool))
+                    not issubclass(argtype, (str, int, bool, Path))
                     and not is_ident_obj_cls(argtype)
                     and argtype is not NoneType
                 ):
                     raise TypeError(
-                        f"Automatically generating caching key to cache a function call requires all arguments to be one of type: str, int, bool, or None. Found {name} with type {argtype}"
+                        f"Automatically generating caching key to cache a function call requires all arguments to be one of type: str, int, bool, Path, or None. Found {name} with type {argtype}"
                     )
             elif origin is Union:
                 args = get_args(argtype)
                 if any(
                     a is not NoneType
                     and get_origin(a) is not Literal
-                    and not issubclass(a, (str, int, bool))
+                    and not issubclass(a, (str, int, bool, Path))
                     for a in args
                 ):
                     raise TypeError(
-                        f"Automatically generating caching key to cache a function call requires all arguments to be one of type: str, int, bool, or None. Found {name} with type {argtype}"
+                        f"Automatically generating caching key to cache a function call requires all arguments to be one of type: str, int, bool, Path, or None. Found {name} with type {argtype}"
                     )
             elif origin is Literal:
                 args = get_args(argtype)
