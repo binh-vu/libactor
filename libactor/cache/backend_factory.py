@@ -22,11 +22,9 @@ class FuncSqliteBackendFactory:
     ):
         def constructor(func, cache_args_helper):
             backend = SqliteBackend(
-                func=func,
+                dbfile=dbdir / (filename or f"{func.__name__}.sqlite"),
                 ser=pickle.dumps,
                 deser=pickle.loads,
-                dbdir=dbdir,
-                filename=filename,
                 compression=compression,
             )
             return wrap_backend(backend, mem_persist, log_serde_time)
@@ -45,11 +43,9 @@ class ActorSqliteBackendFactory:
     ):
         def constructor(self: Actor, func, cache_args_helper):
             backend = SqliteBackend(
-                func=func,
+                dbfile=self.actor_dir / (filename or f"{func.__name__}.sqlite"),
                 ser=pickle.dumps,
                 deser=pickle.loads,
-                dbdir=self.actor_dir,
-                filename=filename,
                 compression=compression,
             )
             return wrap_backend(backend, mem_persist, log_serde_time)

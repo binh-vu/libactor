@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any, Callable, Generic, Optional, Union
 
 from hugedict.sqlite import SqliteDict, SqliteDictFieldType
+from loguru import logger
+from timer import Timer
+
 from libactor.actor.actor import Actor
 from libactor.cache.cache_args import CacheArgsHelper
 from libactor.misc import Chain2, identity
 from libactor.storage.global_storage import GlobalStorage
 from libactor.typing import Compression, T
-from loguru import logger
-from timer import Timer
 
 try:
     import lz4.frame as lz4_frame  # type: ignore
@@ -27,7 +28,6 @@ except ImportError:
 class Backend(Generic[T], ABC):
     def __init__(
         self,
-        func: Callable,
         ser: Callable[[T], bytes],
         deser: Callable[[bytes], T],
         compression: Optional[Compression] = None,
@@ -68,18 +68,15 @@ class Backend(Generic[T], ABC):
 class SqliteBackend(Backend):
     def __init__(
         self,
-        func: Callable,
+        dbfile: Path,
         ser: Callable[[Any], bytes],
         deser: Callable[[bytes], Any],
-        dbdir: Path,
-        filename: Optional[str] = None,
         compression: Optional[Compression] = None,
     ):
-        super().__init__(func, ser, deser, compression)
-        self.filename = filename or f"{func.__name__}.sqlite"
-        self.dbdir = dbdir
+        super().__init__(ser, deser, compression)
+        self.dbfile = dbfile
         self.dbconn = SqliteDict(
-            self.dbdir / self.filename,
+            self.dbfile,
             keytype=SqliteDictFieldType.bytes,
             ser_value=identity,
             deser_value=identity,
@@ -98,7 +95,7 @@ class SqliteBackend(Backend):
     def __reduce__(self) -> str | tuple[Any, ...]:
         return (
             SqliteBackend,
-            (None, self.ser, self.deser, self.dbdir, self.filename, self.compression),
+            (self.dbfile, self.ser, self.deser, self.compression),
         )
 
 
