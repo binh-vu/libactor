@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from libactor.cache import BackendFactory, IdentObj, MemBackend, cache
 
 
@@ -55,3 +57,18 @@ def test_cache_method():
     # next call with the different argument (key), the value will be recalculated
     arr.key = "def"
     assert actor1.square_sum(arr) == 154
+
+
+def test_cache_magic_method():
+    class Actor:
+        def __init__(self, coeff: int):
+            self.coeff = coeff
+
+        @cache(backend=BackendFactory.actor.mem)
+        def __call__(self, arr: IdentObj[list[int]]):
+            return self.coeff * sum([x**2 for x in arr.value])
+
+    actor = Actor(2)
+    # first time they call, an error will be thrown to tell users to use proper method name
+    with pytest.raises(AssertionError):
+        actor(IdentObj(key="abc", value=[1, 2, 3]))

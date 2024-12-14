@@ -88,6 +88,9 @@ def cache(
             def method(self, *args, **kwargs):
                 if cache_attr not in self.__dict__:
                     self.__dict__[cache_attr] = {}
+                assert not (
+                    func.__name__.startswith("__") and func.__name__.endswith("__")
+                ), "Current implementation does not support caching magic methods as we cannot replace them with a new method."
                 assert func.__name__ not in self.__dict__[cache_attr], (
                     self,
                     cache_attr,
