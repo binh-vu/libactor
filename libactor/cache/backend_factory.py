@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import pickle
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Union
 
-from libactor.actor.actor import Actor
+from libactor.actor import Actor
 from libactor.cache.backend import MemBackend, SqliteBackend, wrap_backend
-from libactor.storage.global_storage import GlobalStorage
 from libactor.typing import Compression
+from typing_extensions import Self
 
 
 class FuncSqliteBackendFactory:
@@ -52,6 +53,26 @@ class ActorSqliteBackendFactory:
 
         return constructor
 
+    @staticmethod
+    def serde(
+        *,
+        cls: type[DataSerdeMixin],
+        compression: Optional[Compression] = None,
+        mem_persist: Optional[Union[MemBackend, bool]] = None,
+        filename: Optional[str] = None,
+        log_serde_time: bool | str = False,
+    ):
+        def constructor(self: Actor, func, cache_args_helper):
+            backend = SqliteBackend(
+                dbfile=self.actor_dir / (filename or f"{func.__name__}.sqlite"),
+                ser=cls.ser,
+                deser=cls.deser,
+                compression=compression,
+            )
+            return wrap_backend(backend, mem_persist, log_serde_time)
+
+        return constructor
+
 
 def func_mem_backend_factory(func, cache_args_helper):
     return MemBackend()
@@ -74,3 +95,14 @@ class ActorBackendFactory:
 class BackendFactory:
     func = FuncBackendFactory
     actor = ActorBackendFactory
+
+
+class DataSerdeMixin(ABC):
+    """Mixin for serializing and deserializing data to and from bytes. Compression should handle separately such as in the backend."""
+
+    @abstractmethod
+    def ser(self) -> bytes: ...
+
+    @classmethod
+    @abstractmethod
+    def deser(cls, data: bytes) -> Self: ...

@@ -15,10 +15,9 @@ from typing import (
     get_type_hints,
 )
 
-from loguru import logger
-
 from libactor.cache.identitied_object import get_ident_obj_key, is_ident_obj_cls
 from libactor.typing import ActorFnTrait, ArgSer, NoneType
+from loguru import logger
 
 
 class CacheArgsHelper:

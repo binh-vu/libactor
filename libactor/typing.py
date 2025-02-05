@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Literal, Optional, Protocol, TypeVar, Union
 
+
 T = TypeVar("T")
 P = TypeVar("P")
 

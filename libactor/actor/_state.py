@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from libactor.actor.version import ActorVersion
+from libactor.actor._version import ActorVersion
 from libactor.misc import get_classpath, param_as_dict
 from libactor.typing import DataClassInstance
 

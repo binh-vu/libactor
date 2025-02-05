@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Callable, Type
+from typing import Callable, Literal, Optional, Sequence, Type, overload
 
 import orjson
-
-from libactor.typing import DataClassInstance
+from libactor.typing import Compression, DataClassInstance
+from serde.helper import AVAILABLE_COMPRESSIONS
 
 TYPE_ALIASES = {"typing.List": "list", "typing.Dict": "dict", "typing.Set": "set"}
 
@@ -120,3 +120,38 @@ def _param_as_dict_inner(obj, dict_factory):
     #     return str(ReamWorkspace.get_instance().get_rel_path(obj.absolute()))
     else:
         return deepcopy(obj)
+
+
+@dataclass
+class NoParams:
+    """For an actor that has no parameter"""
+
+    pass
+
+
+@overload
+def to_serde_compression(
+    compression: Compression,
+) -> AVAILABLE_COMPRESSIONS: ...
+
+
+@overload
+def to_serde_compression(
+    compression: Literal[None],
+) -> None: ...
+
+
+def to_serde_compression(
+    compression: Optional[Compression],
+) -> Optional[AVAILABLE_COMPRESSIONS]:
+    if compression is None:
+        return None
+
+    if compression == "gzip":
+        return "gz"
+
+    seq: Sequence[AVAILABLE_COMPRESSIONS] = ["lz4", "bz2"]
+    if compression in seq:
+        return compression
+
+    raise Exception(f"Not supported compression: {compression}")

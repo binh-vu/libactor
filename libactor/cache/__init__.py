@@ -1,5 +1,5 @@
 from libactor.cache.backend import Backend, MemBackend, SqliteBackend
-from libactor.cache.backend_factory import BackendFactory
+from libactor.cache.backend_factory import BackendFactory, DataSerdeMixin
 from libactor.cache.cache import cache
 from libactor.cache.identitied_object import (
     IdentObj,
@@ -13,6 +13,7 @@ __all__ = [
     "MemBackend",
     "SqliteBackend",
     "BackendFactory",
+    "DataSerdeMixin",
     "cache",
     "IdentObj",
     "LazyIdentObj",
