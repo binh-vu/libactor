@@ -10,8 +10,6 @@ import orjson
 from hugedict.sqlite import SqliteDict, SqliteDictFieldType
 from loguru import logger
 
-from libactor.misc import identity
-
 
 class GlobalStorage:
     """For storing actor states"""
