@@ -16,14 +16,14 @@ class PipeObject(Actor[P], Generic[P, InValue, OutValue, Context]):
     PipeObject is a subclass of Actor that processes a job in a pipeline.
     """
 
-    def forward(self, job: InValue, context: Context) -> tuple[OutValue, Context]:
+    def forward(self, input: InValue, context: Context) -> tuple[OutValue, Context]:
         """
         Args:
-            job: The job to be processed.
+            input: The job to be processed.
             context: The context needed for processing the job.
 
         Returns:
-            tuple[J, Context]: The processed job and the updated context
+            tuple[OutValue, Context]: The processed job and the updated context
         """
         raise NotImplementedError()
 
