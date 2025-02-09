@@ -58,15 +58,18 @@ class GlobalStorage:
 
     def shorten_key(self, long_key: str):
         """Shorten the key to a shorter version"""
-        short_key = hashlib.sha256(long_key.encode()).hexdigest()[:8]
+        if long_key in self.key_mapping:
+            return self.key_mapping[long_key].short_key
 
+        # shorten the key
+        short_key = hashlib.sha256(long_key.encode()).hexdigest()[:8]
         if short_key in self.key_mapping:
-            assert self.key_mapping[short_key].long_key == long_key
-        else:
-            assert long_key not in self.key_mapping
-            self.key_mapping[long_key] = MappedKey(
-                long_key=long_key, short_key=short_key
+            # if the short key already exists, we have an error
+            raise Exception(
+                f"Collision! Two keys {long_key} and {self.key_mapping[short_key].long_key} have the same short key: {short_key}"
             )
+        self.key_mapping[long_key] = MappedKey(long_key=long_key, short_key=short_key)
+        self.key_mapping[short_key] = MappedKey(long_key=long_key, short_key=short_key)
 
         return short_key
 

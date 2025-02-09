@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Mapping, TypedDict, TypeVar, Union
 
 from libactor.actor._actor import Actor, P
 
@@ -8,15 +8,16 @@ InValue = TypeVar("InValue")
 OutValue = TypeVar("OutValue")
 
 """Storing context needed for processing a job"""
-Context = TypeVar("Context", bound=dict)
+Context = TypeVar("Context", bound=Mapping)
+NewContext = TypeVar("NewContext", bound=Mapping)
 
 
-class PipeObject(Actor[P], Generic[P, InValue, OutValue, Context]):
+class PipeObject(Actor[P], Generic[P, InValue, OutValue, Context, NewContext]):
     """
     PipeObject is a subclass of Actor that processes a job in a pipeline.
     """
 
-    def forward(self, input: InValue, context: Context) -> tuple[OutValue, Context]:
+    def forward(self, input: InValue, context: Context) -> tuple[OutValue, NewContext]:
         """
         Args:
             input: The job to be processed.
