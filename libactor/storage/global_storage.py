@@ -36,6 +36,7 @@ class GlobalStorage:
         else:
             if verbose:
                 logger.info("GlobalStorage: {}", workdir)
+            Path(workdir).mkdir(exist_ok=True, parents=True)
             GlobalStorage.instance = GlobalStorage(Path(workdir))
         return GlobalStorage.instance
 

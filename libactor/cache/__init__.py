@@ -4,6 +4,7 @@ from libactor.cache.cache import cache
 from libactor.cache.identitied_object import (
     IdentObj,
     LazyIdentObj,
+    fmt_keys,
     is_ident_obj,
     is_ident_obj_cls,
 )
@@ -19,4 +20,5 @@ __all__ = [
     "LazyIdentObj",
     "is_ident_obj",
     "is_ident_obj_cls",
+    "fmt_keys",
 ]

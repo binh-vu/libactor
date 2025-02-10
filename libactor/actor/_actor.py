@@ -41,6 +41,7 @@ class Actor(Generic[P]):
         actor_dir = (
             GlobalStorage.get_instance().workdir
             / f"{self.__class__.__name__}_{self.VERSION}"
+            / self.key
         )
         actor_dir.mkdir(exist_ok=True, parents=True)
         return actor_dir

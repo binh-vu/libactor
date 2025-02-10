@@ -1,8 +1,27 @@
 from __future__ import annotations
 
-from typing import Any, Generic, Mapping, TypedDict, TypeVar, Union
+from dataclasses import dataclass
+from inspect import isfunction
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Generic,
+    Mapping,
+    MutableSequence,
+    Optional,
+    Protocol,
+    Sequence,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from libactor.actor._actor import Actor, P
+from libactor.cache.identitied_object import IdentObj
+from libactor.misc import identity
 
 InValue = TypeVar("InValue")
 OutValue = TypeVar("OutValue")
@@ -29,7 +48,15 @@ class PipeObject(Actor[P], Generic[P, InValue, OutValue, Context, NewContext]):
         raise NotImplementedError()
 
 
-class Pipeline(Generic[InValue, OutValue]):
+class PipeContextObject(
+    PipeObject[P, InValue, InValue, Context, NewContext],
+):
+    """
+    A special PipeObject that does not change the job, but only updates the context.
+    """
+
+
+class Pipeline(Generic[InValue, OutValue, Context, NewContext]):
     """
     A special actor graph that is a linear chain.
 
@@ -39,13 +66,166 @@ class Pipeline(Generic[InValue, OutValue]):
     step-by-step manner, with each step being handled by a different actor.
     """
 
-    def __init__(self, pipes: list[PipeObject]):
-        self.pipes = pipes
+    def __init__(
+        self,
+        pipes: Sequence[PipeObject],
+        type_conversions: Optional[
+            Sequence[UnitTypeConversion | ComposeTypeConversion]
+        ] = None,
+    ):
+        upd_type_conversions: list[UnitTypeConversion | ComposeTypeConversion] = list(
+            type_conversions or []
+        )
+        upd_type_conversions.append(cast_ident_obj)
 
-    def process(self, inp: InValue) -> OutValue:
+        self.pipes = pipes
+        self.pipe_transitions = get_pipe_transitions(pipes, upd_type_conversions)
+
+    def process(
+        self, inp: InValue, context: Optional[Context] = None
+    ) -> tuple[OutValue, NewContext]:
         """Process the job through the pipeline."""
-        context = {}
+        if context is None:
+            context = {}  # type: ignore
+
         val: Any = inp
-        for pipe in self.pipes:
+        for pi, pipe in enumerate(self.pipes):
             val, context = pipe.forward(val, context)
-        return val
+            if pi < len(self.pipe_transitions):
+                val = self.pipe_transitions[pi](val)
+        return val, context  # type: ignore
+
+
+class TypeConversion:
+    """Inspired by Rust type conversion traits. This class allows to derive a type conversion function from output of a pipe to input of another pipe."""
+
+    class UnknownConversion(Exception):
+        pass
+
+    def __init__(
+        self, type_casts: Sequence[UnitTypeConversion | ComposeTypeConversion]
+    ):
+        self.generic_single_type_conversion: dict[type, UnitTypeConversion] = {}
+        self.unit_type_conversions: dict[tuple[type, type], UnitTypeConversion] = {}
+        self.compose_type_conversion: dict[type, ComposeTypeConversion] = {}
+
+        for fn in type_casts:
+            sig = get_type_hints(fn)
+            if len(sig) == 2:
+                fn = cast(UnitTypeConversion, fn)
+
+                intype = sig[[x for x in sig if x != "return"][0]]
+                outtype = sig["return"]
+
+                intype_origin = get_origin(intype)
+                intype_args = get_args(intype)
+                if (
+                    intype_origin is not None
+                    and len(intype_args) == 1
+                    and intype_args[0] is outtype
+                    and isinstance(outtype, TypeVar)
+                ):
+                    # this is a generic conversion G[T] => T
+                    self.generic_single_type_conversion[intype_origin] = fn
+                else:
+                    self.unit_type_conversions[intype, outtype] = fn
+            else:
+                assert len(sig) == 3, "Invalid type conversion function"
+                fn = cast(ComposeTypeConversion, fn)
+
+                intype = sig[[x for x in sig if x != "return"][0]]
+                outtype = sig["return"]
+                intype_origin = get_origin(intype)
+                assert intype_origin is not None
+                self.compose_type_conversion[intype_origin] = fn
+
+    def get_conversion(self, intype: type, outtype: type) -> UnitTypeConversion:
+        if intype is outtype:
+            return identity
+
+        if (intype, outtype) in self.unit_type_conversions:
+            # we already have a unit type conversion function for these types
+            return self.unit_type_conversions[intype, outtype]
+
+        # check if this is a generic conversion
+        intype_origin = get_origin(intype)
+        intype_args = get_args(intype)
+
+        if intype_origin is None or len(intype_args) != 1:
+            raise TypeConversion.UnknownConversion(
+                f"Cannot find conversion from {intype} to {outtype}"
+            )
+
+        outtype_origin = get_origin(outtype)
+        outtype_args = get_args(outtype)
+
+        if outtype_origin is None:
+            # we are converting G[T] => T'
+            if (
+                outtype is not intype_args[0]
+                or intype_origin not in self.generic_single_type_conversion
+            ):
+                # either T != T' or G is unkknown
+                raise TypeConversion.UnknownConversion(
+                    f"Cannot find conversion from {intype} to {outtype}"
+                )
+            return self.generic_single_type_conversion[intype_origin]
+
+        # we are converting G[T] => G'[T']
+        if (
+            outtype_origin is not intype_origin
+            or intype_origin not in self.compose_type_conversion
+        ):
+            # either G != G' or G is unknown
+            raise TypeConversion.UnknownConversion(
+                f"Cannot find conversion from {intype} to {outtype}"
+            )
+        # G == G' => T == T'
+        compose_func = self.compose_type_conversion[intype_origin]
+        func = self.get_conversion(intype_args[0], outtype_args[0])
+        return lambda x: compose_func(x, func)
+
+
+def get_pipe_transitions(
+    pipes: Sequence[PipeObject],
+    type_casts: Sequence[UnitTypeConversion | ComposeTypeConversion],
+) -> list[Callable]:
+    if len(pipes) == 0:
+        return []
+
+    conversion = TypeConversion(type_casts)
+    transformations = []
+
+    _, prev_intype = get_input_output_type(pipes[0].__class__)
+    for pipe in pipes[1:]:
+        intype, outtype = get_input_output_type(pipe.__class__)
+        transformations.append(conversion.get_conversion(prev_intype, intype))
+        prev_intype = outtype
+
+    return transformations
+
+
+def get_input_output_type(cls: type[PipeObject]) -> tuple[type, type]:
+    sig = get_type_hints(cls.forward)
+    if get_origin(sig["return"]) is not tuple:
+        raise Exception("Invalid return type" + str(get_origin(sig["return"])))
+
+    input_type = sig["input"]
+    output_type = get_args(sig["return"])[0]
+    return input_type, output_type
+
+
+UnitTypeConversion = Annotated[
+    Callable[[Any], Any], "A function that convert an object of type T1 to T2"
+]
+ComposeTypeConversion = Annotated[
+    Callable[[Any, UnitTypeConversion], Any],
+    "A function that convert a generic object of type G[T1] to G[T2]",
+]
+
+T1 = TypeVar("T1")
+T2 = TypeVar("T2")
+
+
+def cast_ident_obj(obj: IdentObj[T1], func: Callable[[T1], T2]) -> IdentObj[T2]:
+    return IdentObj(obj.key, func(obj.value))

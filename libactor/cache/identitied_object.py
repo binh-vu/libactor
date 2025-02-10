@@ -41,3 +41,9 @@ def is_ident_obj_cls(x: type) -> bool:
 
 def get_ident_obj_key(x: Union[IdentObj, LazyIdentObj]) -> str:
     return x.key
+
+
+def fmt_keys(**kwargs: str | IdentObj) -> str:
+    return ",".join(
+        (f"{k}={v.key}" if is_ident_obj(v) else f"{k}={v}" for k, v in kwargs.items())
+    )
