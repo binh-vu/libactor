@@ -3,13 +3,24 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Callable, Literal, Optional, Sequence, Type, overload
+from typing import (
+    Callable,
+    Iterable,
+    Literal,
+    Optional,
+    Sequence,
+    Type,
+    TypeVar,
+    overload,
+)
 
 import orjson
-from libactor.typing import Compression, DataClassInstance
+from joblib import Parallel, delayed
+from libactor.typing import Compression, DataClassInstance, T
 from serde.helper import AVAILABLE_COMPRESSIONS
 
 TYPE_ALIASES = {"typing.List": "list", "typing.Dict": "dict", "typing.Set": "set"}
+CB = TypeVar("CB")
 
 
 def identity(x):
@@ -155,3 +166,20 @@ def to_serde_compression(
         return compression
 
     raise Exception(f"Not supported compression: {compression}")
+
+
+_parallel_executor = None
+
+
+def get_parallel_executor(
+    n_jobs: int = -1,
+    return_as: Literal["generator_unordered", "generator"] = "generator_unordered",
+) -> Callable[[Iterable[T]], Iterable[T]]:
+    global _parallel_executor
+    if _parallel_executor is None:
+        _parallel_executor = Parallel(n_jobs=n_jobs, return_as=return_as)
+    return _parallel_executor  # type: ignore
+
+
+def typed_delayed(func: CB) -> CB:
+    return delayed(func)  # type: ignore

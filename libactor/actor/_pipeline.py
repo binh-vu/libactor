@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from inspect import isfunction
 from typing import (
@@ -7,6 +8,7 @@ from typing import (
     Any,
     Callable,
     Generic,
+    Literal,
     Mapping,
     MutableSequence,
     Optional,
@@ -17,11 +19,13 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
+    overload,
 )
 
 from libactor.actor._actor import Actor, P
 from libactor.cache.identitied_object import IdentObj
-from libactor.misc import identity
+from libactor.misc import get_parallel_executor, identity, typed_delayed
+from tqdm import tqdm
 
 InValue = TypeVar("InValue")
 OutValue = TypeVar("OutValue")
@@ -81,19 +85,74 @@ class Pipeline(Generic[InValue, OutValue, Context, NewContext]):
         self.pipes = pipes
         self.pipe_transitions = get_pipe_transitions(pipes, upd_type_conversions)
 
+    @overload
     def process(
-        self, inp: InValue, context: Optional[Context] = None
-    ) -> tuple[OutValue, NewContext]:
+        self,
+        inp: InValue,
+        context: Optional[Context | Callable[[], Context]] = None,
+        return_context: Literal[False] = False,
+    ) -> OutValue: ...
+
+    @overload
+    def process(
+        self,
+        inp: InValue,
+        context: Optional[Context | Callable[[], Context]] = None,
+        return_context: Literal[True] = True,
+    ) -> tuple[OutValue, NewContext]: ...
+
+    def process(
+        self,
+        inp: InValue,
+        context: Optional[Context | Callable[[], Context]] = None,
+        return_context: bool = False,
+    ) -> OutValue | tuple[OutValue, NewContext]:
         """Process the job through the pipeline."""
         if context is None:
             context = {}  # type: ignore
+        elif callable(context):
+            context = context()
 
         val: Any = inp
         for pi, pipe in enumerate(self.pipes):
             val, context = pipe.forward(val, context)
             if pi < len(self.pipe_transitions):
                 val = self.pipe_transitions[pi](val)
-        return val, context  # type: ignore
+
+        if return_context:
+            return val, context  # type: ignore
+        return val
+
+    def par_process(
+        self,
+        lst: list[InValue],
+        context: Optional[Context | Callable[[], Context]] = None,
+        n_jobs: int = -1,
+        verbose: bool = True,
+    ):
+        if n_jobs == 1:
+            if context is not None:
+                context = context() if callable(context) else context
+
+            return list(
+                tqdm(
+                    (self.process(inp, context) for inp in lst),
+                    total=len(lst),
+                    disable=not verbose,
+                    desc="pipeline processing",
+                )
+            )
+
+        return list(
+            tqdm(
+                get_parallel_executor(n_jobs=n_jobs, return_as="generator")(
+                    typed_delayed(self.process)(inp, context) for inp in lst
+                ),
+                total=len(lst),
+                disable=not verbose,
+                desc="pipeline processing",
+            )
+        )
 
 
 class TypeConversion:

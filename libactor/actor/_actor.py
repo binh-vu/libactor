@@ -45,3 +45,8 @@ class Actor(Generic[P]):
         )
         actor_dir.mkdir(exist_ok=True, parents=True)
         return actor_dir
+
+    def __reduce__(self):
+        if len(self.dep_actors) == 0:
+            return self.__class__, (self.params,)
+        return self.__class__, (self.params, self.dep_actors)
