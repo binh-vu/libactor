@@ -11,7 +11,7 @@ python = "^3.11"
 orjson = "^3.10.7"
 loguru = "^0.7.2"
 hugedict = "^2.14.1"
-
+joblib = "^1.4.2"
 
 [tool.poetry.group.dev.dependencies]
 autoflake = "^2.3.1"

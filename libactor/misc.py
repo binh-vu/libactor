@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from copy import deepcopy
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
@@ -169,6 +170,7 @@ def to_serde_compression(
 
 
 _parallel_executor = None
+_parallel_executor_objects = {}
 
 
 def get_parallel_executor(
@@ -183,3 +185,11 @@ def get_parallel_executor(
 
 def typed_delayed(func: CB) -> CB:
     return delayed(func)  # type: ignore
+
+
+def get_cache_object(id: int, obj):
+    """Cache the object to avoid reinitializing the objects multiple time in joblib"""
+    global _parallel_executor_objects
+    if id not in _parallel_executor_objects:
+        _parallel_executor_objects[id] = obj
+    return _parallel_executor_objects[id]

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from copy import copy
-from dataclasses import dataclass
-from inspect import isfunction
 from typing import (
     Annotated,
     Any,
@@ -10,9 +7,7 @@ from typing import (
     Generic,
     Literal,
     Mapping,
-    MutableSequence,
     Optional,
-    Protocol,
     Sequence,
     TypeVar,
     cast,
@@ -24,7 +19,12 @@ from typing import (
 
 from libactor.actor._actor import Actor, P
 from libactor.cache.identitied_object import IdentObj
-from libactor.misc import get_parallel_executor, identity, typed_delayed
+from libactor.misc import (
+    get_cache_object,
+    get_parallel_executor,
+    identity,
+    typed_delayed,
+)
 from tqdm import tqdm
 
 InValue = TypeVar("InValue")
@@ -143,10 +143,19 @@ class Pipeline(Generic[InValue, OutValue, Context, NewContext]):
                 )
             )
 
+        ppid = id(self)
+        ppobj = self
+
+        def invoke(inp, context):
+            return get_cache_object(
+                ppid,
+                ppobj,
+            ).process(inp, context)
+
         return list(
             tqdm(
                 get_parallel_executor(n_jobs=n_jobs, return_as="generator")(
-                    typed_delayed(self.process)(inp, context) for inp in lst
+                    typed_delayed(invoke)(inp, context) for inp in lst
                 ),
                 total=len(lst),
                 disable=not verbose,
