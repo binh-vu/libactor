@@ -22,6 +22,10 @@ class Actor(Generic[P]):
         self.dep_actors: Sequence[Actor] = dep_actors or []
         self._cache_obj = {}
 
+    def forward(self, *args, **kwargs):
+        # This method should be implemented by subclasses to define the forward pass logic
+        raise NotImplementedError("Subclasses should implement this method")
+
     def get_actor_state(self) -> ActorState:
         """Get the state of this actor"""
         deps = [actor.get_actor_state() for actor in self.dep_actors]
