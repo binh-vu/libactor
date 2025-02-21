@@ -5,7 +5,7 @@ from typing import Generic, Optional, Sequence
 
 import orjson
 from libactor.actor._state import ActorState
-from libactor.storage.global_storage import GlobalStorage
+from libactor.storage._global_storage import GlobalStorage
 from libactor.typing import P
 
 

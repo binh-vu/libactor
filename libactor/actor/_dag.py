@@ -334,9 +334,9 @@ class DAG:
 
     def process(
         self,
-        actor_inargs: dict[ComputeFnId, tuple],
+        input: dict[ComputeFnId, tuple],
+        output: set[str],
         context: dict[str, Callable | Any],
-        capture_actors: set[str],
     ) -> dict[str, list]:
         context = {k: v() if callable(v) else v for k, v in context.items()}
         actor2context = {}
@@ -360,7 +360,7 @@ class DAG:
         capture_output: dict[ComputeFnId, Any] = defaultdict(list)
 
         for uid, args in sorted(
-            actor_inargs.items(),
+            input.items(),
             key=lambda x: self.graph.get_node(x[0]).topo_index,
             reverse=True,
         ):
@@ -413,7 +413,7 @@ class DAG:
             result = u.invoke(u_args, actor2context[uid])
 
             # capture the output if needed
-            if uid in capture_actors:
+            if uid in output:
                 capture_output[uid].append(result)
 
             # propagate the result to the downstream actors
