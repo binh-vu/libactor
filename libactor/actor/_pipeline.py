@@ -26,6 +26,7 @@ from libactor.misc import (
     identity,
     typed_delayed,
 )
+from libactor.misc._type_conversion import ComposeTypeConversion, UnitTypeConversion
 from tqdm import tqdm
 
 InValue = TypeVar("InValue")
@@ -193,14 +194,6 @@ def get_input_output_type(cls: type[PipeObject]) -> tuple[type, type]:
     output_type = get_args(sig["return"])[0]
     return input_type, output_type
 
-
-UnitTypeConversion = Annotated[
-    Callable[[Any], Any], "A function that convert an object of type T1 to T2"
-]
-ComposeTypeConversion = Annotated[
-    Callable[[Any, UnitTypeConversion], Any],
-    "A function that convert a generic object of type G[T1] to G[T2]",
-]
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")

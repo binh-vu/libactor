@@ -1,4 +1,5 @@
 from libactor.actor._actor import Actor
+from libactor.actor._dag import DAG, Flow
 from libactor.actor._pipeline import (
     Context,
     InValue,
@@ -22,4 +23,6 @@ __all__ = [
     "OutValue",
     "Context",
     "NewContext",
+    "DAG",
+    "Flow",
 ]

@@ -23,7 +23,7 @@ TYPE_ALIASES = {"typing.List": "list", "typing.Dict": "dict", "typing.Set": "set
 CB = TypeVar("CB")
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 

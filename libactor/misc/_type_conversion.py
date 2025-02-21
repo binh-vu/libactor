@@ -111,3 +111,39 @@ class TypeConversion:
         compose_func = self.compose_type_conversion[intype_origin]
         func = self.get_conversion(intype_args[0], outtype_args[0])
         return lambda x: compose_func(x, func)
+
+
+def is_generic_type(t: type) -> bool:
+    return isinstance(t, TypeVar) or any(is_generic_type(a) for a in get_args(t))
+
+
+def align_generic_type(
+    generic_type: type, target_type: type
+) -> tuple[type, tuple[type, type]]:
+    if isinstance(generic_type, TypeVar):
+        return target_type, (generic_type, target_type)
+
+    origin = get_origin(generic_type)
+    assert origin is not None
+    if origin != get_origin(target_type):
+        raise TypeConversion.UnknownConversion(
+            f"Cannot ground generic type {generic_type} to {target_type}"
+        )
+
+    if len(get_args(generic_type)) != 1:
+        raise NotImplementedError()
+
+    gt = align_generic_type(get_args(generic_type)[0], get_args(target_type)[0])
+    return origin[gt[0]], gt[1]
+
+
+def ground_generic_type(generic_type: type, var2type: dict[TypeVar, type]) -> type:
+    if isinstance(generic_type, TypeVar):
+        return var2type[generic_type]
+
+    origin = get_origin(generic_type)
+    if origin is None:
+        # nothing to ground
+        return generic_type
+
+    return origin[*(ground_generic_type(t, var2type) for t in get_args(generic_type))]
