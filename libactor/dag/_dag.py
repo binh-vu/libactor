@@ -45,14 +45,18 @@ class Flow:
         source: list[ComputeFnId] | ComputeFnId,
         target: ComputeFn,
         cardinality: Cardinality = Cardinality.ONE_TO_ONE,
+        is_optional: bool = False,
     ):
         self.source = [source] if isinstance(source, str) else source
         self.cardinality = cardinality
         self.target = target
+        self.is_optional = is_optional
 
-    def __post_init__(self):
         if (self.cardinality == Cardinality.ONE_TO_MANY) and len(self.source) != 1:
             raise Exception("Can't have multiple sources for ONE_TO_MANY")
+
+        if self.cardinality == Cardinality.ONE_TO_ONE and self.is_optional:
+            raise Exception("Can't have optional ONE_TO_ONE flow")
 
 
 @dataclass
@@ -119,11 +123,13 @@ class ActorEdge(BaseEdge[str, int]):
         target: str,
         argindex: int,
         cardinality: Cardinality,
+        is_optional: bool,
         type_conversion: UnitTypeConversion,
     ):
         super().__init__(id, source, target, argindex)
         self.argindex = argindex
         self.cardinality = cardinality
+        self.is_optional = is_optional
         self.type_conversion = type_conversion
 
 
@@ -248,6 +254,7 @@ class DAG:
                         target=u.id,
                         argindex=0,
                         cardinality=flow.cardinality,
+                        is_optional=flow.is_optional,
                         type_conversion=cast_fn,
                     )
                 )
@@ -307,6 +314,7 @@ class DAG:
                             target=uid,
                             argindex=idx,
                             cardinality=flow.cardinality,
+                            is_optional=flow.is_optional,
                             type_conversion=cast_fn,
                         )
                     )
@@ -338,17 +346,17 @@ class DAG:
         context = {k: v() if callable(v) else v for k, v in context.items()}
         actor2context = {}
         actor2args: dict[ComputeFnId, list | deque[tuple]] = {}
-        actor2incard: dict[ComputeFnId, Cardinality] = {}
+        actor2incard: dict[ComputeFnId, tuple[Cardinality, bool]] = {}
 
         for u in self.graph.iter_nodes():
             actor2context[u.id] = tuple(context[name] for name in u.required_context)
             inedges = self.graph.in_edges(u.id)
             if len(inedges) > 0 and inedges[0].cardinality == Cardinality.ONE_TO_MANY:
-                actor2args[u.id] = []
-                actor2incard[u.id] = Cardinality.ONE_TO_MANY
+                actor2args[u.id] = deque()
+                actor2incard[u.id] = (Cardinality.ONE_TO_MANY, inedges[0].is_optional)
             else:
                 actor2args[u.id] = [None] * len(u.required_args)
-                actor2incard[u.id] = Cardinality.ONE_TO_ONE
+                actor2incard[u.id] = (Cardinality.ONE_TO_ONE, False)
 
         stack: list[ComputeFnId] = []
         capture_output: dict[ComputeFnId, Any] = defaultdict(list)
@@ -391,8 +399,16 @@ class DAG:
             u = self.graph.get_node(uid)
 
             # get next arguments to process
-            if actor2incard[uid] == Cardinality.ONE_TO_MANY:
+            if actor2incard[uid][0] == Cardinality.ONE_TO_MANY:
                 u_lst_args: deque[tuple] = actor2args[uid]  # type: ignore
+                if len(u_lst_args) == 0:
+                    if not actor2incard[uid][1]:  # is optional
+                        raise RuntimeError(
+                            f"Actor `{uid}` requires some data but the upstream actor doesn't produce any"
+                        )
+                    stack.pop()
+                    continue
+
                 u_args = u_lst_args.popleft()
                 if len(u_lst_args) == 0:
                     # we do not have any more arguments to process for this actor
