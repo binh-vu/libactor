@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import enum
-import itertools
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from functools import lru_cache
+from dataclasses import dataclass
 from typing import (
     Annotated,
     Any,
@@ -21,17 +19,18 @@ from graph.interface import BaseEdge, BaseNode
 from graph.retworkx import RetworkXStrDiGraph, topological_sort
 from libactor.actor._actor import Actor
 from libactor.cache import IdentObj
-from libactor.misc import TypeConversion, identity
-from libactor.misc._type_conversion import (
+from libactor.misc import (
     ComposeTypeConversion,
+    TypeConversion,
     UnitTypeConversion,
     align_generic_type,
     ground_generic_type,
+    identity,
     is_generic_type,
 )
 
 
-class SupportCardinality(enum.Enum):
+class Cardinality(enum.Enum):
     ONE_TO_ONE = 1
     ONE_TO_MANY = 2
 
@@ -45,16 +44,14 @@ class Flow:
         self,
         source: list[ComputeFnId] | ComputeFnId,
         target: ComputeFn,
-        cardinality: SupportCardinality = SupportCardinality.ONE_TO_ONE,
+        cardinality: Cardinality = Cardinality.ONE_TO_ONE,
     ):
         self.source = [source] if isinstance(source, str) else source
         self.cardinality = cardinality
         self.target = target
 
     def __post_init__(self):
-        if (self.cardinality == SupportCardinality.ONE_TO_MANY) and len(
-            self.source
-        ) != 1:
+        if (self.cardinality == Cardinality.ONE_TO_MANY) and len(self.source) != 1:
             raise Exception("Can't have multiple sources for ONE_TO_MANY")
 
 
@@ -86,7 +83,7 @@ class ActorNode(BaseNode[ComputeFnId]):
     @staticmethod
     def get_signature(actor: ComputeFn) -> FnSignature:
         if isinstance(actor, Actor):
-            sig = get_type_hints(actor.new_forward)
+            sig = get_type_hints(actor.forward)
         else:
             sig = get_type_hints(actor)
 
@@ -108,7 +105,7 @@ class ActorNode(BaseNode[ComputeFnId]):
 
     def get_func(self):
         if isinstance(self.actor, Actor):
-            return self.actor.new_forward
+            return self.actor.forward
         else:
             return self.actor
 
@@ -121,7 +118,7 @@ class ActorEdge(BaseEdge[str, int]):
         source: str,
         target: str,
         argindex: int,
-        cardinality: SupportCardinality,
+        cardinality: Cardinality,
         type_conversion: UnitTypeConversion,
     ):
         super().__init__(id, source, target, argindex)
@@ -199,7 +196,7 @@ class DAG:
                         source_return_type = g.get_node(
                             flow.source[i]
                         ).signature.return_type
-                        if flow.cardinality == SupportCardinality.ONE_TO_MANY:
+                        if flow.cardinality == Cardinality.ONE_TO_MANY:
                             source_return_type = get_args(source_return_type)[0]
                         usig.argtypes[i], (var, nt) = align_generic_type(
                             t, source_return_type
@@ -217,7 +214,7 @@ class DAG:
 
             u = g.get_node(uid)
             usig = u.signature
-            if flow.cardinality == SupportCardinality.ONE_TO_MANY:
+            if flow.cardinality == Cardinality.ONE_TO_MANY:
                 # check if the return type is a generic type with a sequence as its origin (S[T])
                 s = g.get_node(flow.source[0])
                 ssig = s.signature
@@ -341,20 +338,17 @@ class DAG:
         context = {k: v() if callable(v) else v for k, v in context.items()}
         actor2context = {}
         actor2args: dict[ComputeFnId, list | deque[tuple]] = {}
-        actor2incard: dict[ComputeFnId, SupportCardinality] = {}
+        actor2incard: dict[ComputeFnId, Cardinality] = {}
 
         for u in self.graph.iter_nodes():
             actor2context[u.id] = tuple(context[name] for name in u.required_context)
             inedges = self.graph.in_edges(u.id)
-            if (
-                len(inedges) > 0
-                and inedges[0].cardinality == SupportCardinality.ONE_TO_MANY
-            ):
+            if len(inedges) > 0 and inedges[0].cardinality == Cardinality.ONE_TO_MANY:
                 actor2args[u.id] = []
-                actor2incard[u.id] = SupportCardinality.ONE_TO_MANY
+                actor2incard[u.id] = Cardinality.ONE_TO_MANY
             else:
                 actor2args[u.id] = [None] * len(u.required_args)
-                actor2incard[u.id] = SupportCardinality.ONE_TO_ONE
+                actor2incard[u.id] = Cardinality.ONE_TO_ONE
 
         stack: list[ComputeFnId] = []
         capture_output: dict[ComputeFnId, Any] = defaultdict(list)
@@ -368,9 +362,9 @@ class DAG:
             result = u.invoke(args, actor2context[uid])
             if (
                 len(u.sorted_outedges) == 1
-                and u.sorted_outedges[0].cardinality != SupportCardinality.ONE_TO_ONE
+                and u.sorted_outedges[0].cardinality != Cardinality.ONE_TO_ONE
             ):
-                if u.sorted_outedges[0].cardinality == SupportCardinality.ONE_TO_MANY:
+                if u.sorted_outedges[0].cardinality == Cardinality.ONE_TO_MANY:
                     actor2args[u.sorted_outedges[0].target] = deque(
                         (x,) for x in reversed(result)
                     )
@@ -397,7 +391,7 @@ class DAG:
             u = self.graph.get_node(uid)
 
             # get next arguments to process
-            if actor2incard[uid] == SupportCardinality.ONE_TO_MANY:
+            if actor2incard[uid] == Cardinality.ONE_TO_MANY:
                 u_lst_args: deque[tuple] = actor2args[uid]  # type: ignore
                 u_args = u_lst_args.popleft()
                 if len(u_lst_args) == 0:
@@ -419,7 +413,7 @@ class DAG:
             # propagate the result to the downstream actors
             if (
                 len(u.sorted_outedges) > 0
-                and u.sorted_outedges[0].cardinality == SupportCardinality.ONE_TO_MANY
+                and u.sorted_outedges[0].cardinality == Cardinality.ONE_TO_MANY
             ):
                 actor2args[u.sorted_outedges[0].target].extend((x,) for x in result)
                 stack.append(u.sorted_outedges[0].target)

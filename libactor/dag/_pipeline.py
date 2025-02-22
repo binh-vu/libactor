@@ -17,7 +17,7 @@ from typing import (
     overload,
 )
 
-from libactor.actor._actor import Actor, P
+from libactor.actor import Actor, P
 from libactor.cache.identitied_object import IdentObj
 from libactor.misc import (
     TypeConversion,
