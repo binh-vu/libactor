@@ -21,6 +21,7 @@ from libactor.actor._actor import Actor
 from libactor.cache import IdentObj
 from libactor.misc import (
     ComposeTypeConversion,
+    FnSignature,
     TypeConversion,
     UnitTypeConversion,
     align_generic_type,
@@ -59,13 +60,6 @@ class Flow:
             raise Exception("Can't have optional ONE_TO_ONE flow")
 
 
-@dataclass
-class FnSignature:
-    return_type: type
-    argnames: list[str]
-    argtypes: list[type]
-
-
 class ActorNode(BaseNode[ComputeFnId]):
     def __init__(
         self,
@@ -87,21 +81,9 @@ class ActorNode(BaseNode[ComputeFnId]):
     @staticmethod
     def get_signature(actor: ComputeFn) -> FnSignature:
         if isinstance(actor, Actor):
-            sig = get_type_hints(actor.forward)
+            return FnSignature.parse(actor.forward)
         else:
-            sig = get_type_hints(actor)
-
-        argnames = list(sig.keys())[:-1]
-        try:
-            return FnSignature(
-                sig["return"],
-                argnames,
-                [sig[arg] for arg in argnames],
-            )
-        except:
-            print("Cannot figure out the signature of", actor)
-            print("The parsed signature is:", sig)
-            raise
+            return FnSignature.parse(actor)
 
     def invoke(self, args: Sequence, context: Sequence):
         norm_args = (self.type_conversions[i](a) for i, a in enumerate(args))
