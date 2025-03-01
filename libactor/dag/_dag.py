@@ -12,7 +12,6 @@ from typing import (
     TypeVar,
     get_args,
     get_origin,
-    get_type_hints,
 )
 
 from graph.interface import BaseEdge, BaseNode
@@ -127,7 +126,12 @@ class DAG:
 
     @staticmethod
     def from_dictmap(
-        dictmap: dict[ComputeFnId, Flow | ComputeFn],
+        dictmap: dict[
+            ComputeFnId,
+            Flow
+            | ComputeFn
+            | Sequence[Flow | ComputeFn | tuple[ComputeFnId, ComputeFn | Flow]],
+        ],
         type_conversions: Optional[
             Sequence[UnitTypeConversion | ComposeTypeConversion]
         ] = None,
@@ -136,10 +140,14 @@ class DAG:
         """Create a DAG from a dictionary mapping.
 
         Args:
-            dictmap: A dictionary mapping of actor identifiers to actors or tuples of upstream actors and the actor.
+            dictmap: A dictionary mapping identifier to:
+                1. an actor
+                2. a flow specifying the upstream actors and the actor.
+                3. a linear sequence (pipeline) of flows and actors. If a sequence is provided, the output of an actor will be the input
+                    of the next actor. The identifier of each actor in the pipeline will be generated automatically (Flow | ComputeFn) unless is provided
+                    in the tuple[ComputeFnId, ComputeFn | Flow]
             type_conversions: A list of type conversions to be used for converting the input types.
             strict: If True, we do type checking.
-
         Returns:
             DAG: A directed acyclic graph (DAG) constructed from the provided dictionary mapping.
         """
@@ -154,8 +162,56 @@ class DAG:
             check_cycle=True, multigraph=False
         )
 
+        # normalize dictmap to remove pipeline
+        # to remove the pipeline, we need to rewire the start actor and end actor
+        # because the other actor think the pipeline as a single actor
+        assert (
+            "" not in dictmap
+        ), "Empty key is not allowed as it's a reserved key for placeholder in pipeline"
+        norm_dictmap: dict[ComputeFnId, Flow | ComputeFn] = {}
+        pipeline_idmap: dict[ComputeFnId, ComputeFnId] = {}
+        for uid, flow in dictmap.items():
+            if isinstance(flow, Sequence):
+                pipe_ids = []
+                for uof_i, uof_tup in enumerate(flow):
+                    if isinstance(uof_tup, tuple):
+                        uof_id, uof = uof_tup
+                    else:
+                        if uof_i > 0:
+                            uof_id = f"{uid}:{uof_i}"
+                        else:
+                            uof_id = uid
+                        uof = uof_tup
+
+                    if isinstance(uof, Flow):
+                        if any(s == "" for s in uof.source) and uof_i == 0:
+                            raise ValueError(
+                                "Trying to use the input of the previous object in the pipeline at the start of the pipeline"
+                            )
+                        new_uof = Flow(
+                            source=[
+                                s if s != "" else pipe_ids[uof_i - 1]
+                                for s in uof.source
+                            ],
+                            target=uof.target,
+                            cardinality=uof.cardinality,
+                            is_optional=uof.is_optional,
+                        )
+                    else:
+                        new_uof = Flow(
+                            [] if uof_i == 0 else [pipe_ids[uof_i - 1]], target=uof
+                        )
+                    norm_dictmap[uof_id] = new_uof
+                    pipe_ids.append(uof_id)
+                pipeline_idmap[uid] = pipe_ids[len(flow) - 1]
+            else:
+                norm_dictmap[uid] = flow
+        for uid, flow in dictmap.items():
+            if isinstance(flow, Flow):
+                flow.source = [pipeline_idmap.get(s, s) for s in flow.source]
+
         # create a graph
-        for uid, uinfo in dictmap.items():
+        for uid, uinfo in norm_dictmap.items():
             if isinstance(uinfo, Flow):
                 actor = uinfo.target
             else:
@@ -163,7 +219,7 @@ class DAG:
             g.add_node(ActorNode(uid, actor))
 
         # grounding function that has generic type input and output
-        for uid, flow in dictmap.items():
+        for uid, flow in norm_dictmap.items():
             if not isinstance(flow, Flow):
                 continue
 
@@ -196,7 +252,7 @@ class DAG:
                         var2type,
                     )
 
-        for uid, flow in dictmap.items():
+        for uid, flow in norm_dictmap.items():
             if not isinstance(flow, Flow):
                 continue
 
@@ -207,7 +263,7 @@ class DAG:
                 s = g.get_node(flow.source[0])
                 ssig = s.signature
 
-                ssig_return_origin = get_origin(ssig.return_type)
+                ssig_return_origin = get_origin(tp=ssig.return_type)
                 ssig_return_args = get_args(ssig.return_type)
                 cast_fn = identity
                 if (
@@ -301,8 +357,8 @@ class DAG:
                         )
                     )
 
-            # arguments of a compute function that are not provided by the upstream actors must be provided by the context.
             u.required_args = usig.argnames[: len(flow.source)]
+            # arguments of a compute function that are not provided by the upstream actors must be provided by the context.
             u.required_context = usig.argnames[len(flow.source) :]
 
         # sort the outedges of each node in topological order
@@ -331,7 +387,16 @@ class DAG:
         actor2incard: dict[ComputeFnId, tuple[Cardinality, bool]] = {}
 
         for u in self.graph.iter_nodes():
-            actor2context[u.id] = tuple(context[name] for name in u.required_context)
+            if u.id in input:
+                # user provided input should supersede the context
+                n_provided_args = len(input[u.id])
+                n_consumed_context = n_provided_args - len(u.required_args)
+            else:
+                n_consumed_context = 0
+
+            actor2context[u.id] = tuple(
+                context[name] for name in u.required_context[n_consumed_context:]
+            )
             inedges = self.graph.in_edges(u.id)
             if len(inedges) > 0 and inedges[0].cardinality == Cardinality.ONE_TO_MANY:
                 actor2args[u.id] = deque()

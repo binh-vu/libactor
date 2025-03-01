@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import collections.abc
+from locale import normalize
+from types import UnionType
 from typing import (
     Annotated,
     Any,
     Callable,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    MutableSet,
     Sequence,
+    Set,
     TypeVar,
+    Union,
     cast,
     get_args,
     get_origin,
@@ -66,35 +75,44 @@ class TypeConversion:
                 assert intype_origin is not None
                 self.compose_type_conversion[intype_origin] = fn
 
-    def get_conversion(self, intype: type, outtype: type) -> UnitTypeConversion:
-        if intype is outtype:
+    def get_conversion(
+        self, source_type: type, target_type: type
+    ) -> UnitTypeConversion:
+        # handle identity conversion
+        # happen when source_type = target_type or target_type is Union[source_type, ...]
+        if source_type == target_type:
+            # source_type is target_type doesn't work with collections.abc.Sequence
+            return identity
+        if get_origin(target_type) in (Union, UnionType) and source_type in get_args(
+            target_type
+        ):
             return identity
 
-        if (intype, outtype) in self.unit_type_conversions:
+        if (source_type, target_type) in self.unit_type_conversions:
             # we already have a unit type conversion function for these types
-            return self.unit_type_conversions[intype, outtype]
+            return self.unit_type_conversions[source_type, target_type]
 
         # check if this is a generic conversion
-        intype_origin = get_origin(intype)
-        intype_args = get_args(intype)
+        intype_origin = get_origin(source_type)
+        intype_args = get_args(source_type)
 
         if intype_origin is None or len(intype_args) != 1:
             raise TypeConversion.UnknownConversion(
-                f"Cannot find conversion from {intype} to {outtype}"
+                f"Cannot find conversion from {source_type} to {target_type}"
             )
 
-        outtype_origin = get_origin(outtype)
-        outtype_args = get_args(outtype)
+        outtype_origin = get_origin(target_type)
+        outtype_args = get_args(target_type)
 
         if outtype_origin is None:
             # we are converting G[T] => T'
             if (
-                outtype is not intype_args[0]
+                target_type is not intype_args[0]
                 or intype_origin not in self.generic_single_type_conversion
             ):
                 # either T != T' or G is unkknown
                 raise TypeConversion.UnknownConversion(
-                    f"Cannot find conversion from {intype} to {outtype}"
+                    f"Cannot find conversion from {source_type} to {target_type}"
                 )
             return self.generic_single_type_conversion[intype_origin]
 
@@ -105,12 +123,31 @@ class TypeConversion:
         ):
             # either G != G' or G is unknown
             raise TypeConversion.UnknownConversion(
-                f"Cannot find conversion from {intype} to {outtype}"
+                f"Cannot find conversion from {source_type} to {target_type}"
             )
         # G == G' => T == T'
         compose_func = self.compose_type_conversion[intype_origin]
         func = self.get_conversion(intype_args[0], outtype_args[0])
         return lambda x: compose_func(x, func)
+
+
+def patch_get_origin(t: type) -> Any:
+    """The original get_origin(typing.Sequence) returns collections.abc.Sequence.
+    Later comparing typing.Sequence[T] to collections.abc.Sequence[T] aren't equal.
+
+    This function will return typing.Sequence instead.
+    """
+    origin = get_origin(t)
+    if origin is None:
+        return origin
+    return {
+        collections.abc.Mapping: Mapping,
+        collections.abc.Sequence: Sequence,
+        collections.abc.MutableSequence: MutableSequence,
+        collections.abc.MutableMapping: MutableMapping,
+        collections.abc.Set: Set,
+        collections.abc.MutableSet: MutableSet,
+    }.get(origin, origin)
 
 
 def is_generic_type(t: type) -> bool:
@@ -120,12 +157,13 @@ def is_generic_type(t: type) -> bool:
 def align_generic_type(
     generic_type: type, target_type: type
 ) -> tuple[type, tuple[type, type]]:
+    """Return the grounded outer type, and the mapping from the TypeVar to the concrete type"""
     if isinstance(generic_type, TypeVar):
         return target_type, (generic_type, target_type)
 
-    origin = get_origin(generic_type)
+    origin = patch_get_origin(generic_type)
     assert origin is not None
-    if origin != get_origin(target_type):
+    if origin != patch_get_origin(target_type):
         raise TypeConversion.UnknownConversion(
             f"Cannot ground generic type {generic_type} to {target_type}"
         )
