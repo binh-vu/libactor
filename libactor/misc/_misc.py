@@ -192,3 +192,10 @@ def get_cache_object(id: int, obj):
     if id not in _parallel_executor_objects:
         _parallel_executor_objects[id] = obj
     return _parallel_executor_objects[id]
+
+
+def assign_dataclass_field_names(cls: type[T]):
+    """Set back the fields of the dataclass to be the same as the name of the fields so they can use T.<field> as the field name"""
+    assert is_dataclass(cls)
+    for field in fields(cls):
+        setattr(cls, field.name, field.name)
