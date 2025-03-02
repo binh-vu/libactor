@@ -35,8 +35,29 @@ class Cardinality(enum.Enum):
     ONE_TO_MANY = 2
 
 
+class PartialFn:
+    def __init__(self, fn: Callable, **kwargs):
+        self.fn = fn
+        self.default_args = kwargs
+        self.signature = FnSignature.parse(fn)
+
+        provided_args = set(self.default_args.keys())
+        idx = len(self.signature.argnames)
+        for i in range(len(self.signature.argnames) - 1, -1, -1):
+            if self.signature.argnames[i] in provided_args:
+                idx = i
+            else:
+                break
+        assert len(provided_args.intersection(self.signature.argnames[:idx])) == 0
+        self.signature.argnames = self.signature.argnames[:idx]
+        self.signature.argtypes = self.signature.argtypes[:idx]
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs, **self.default_args)
+
+
 ComputeFnId = Annotated[str, "ComputeFn Identifier"]
-ComputeFn = Actor | Callable
+ComputeFn = Actor | PartialFn | Callable
 
 
 class Flow:
@@ -81,6 +102,8 @@ class ActorNode(BaseNode[ComputeFnId]):
     def get_signature(actor: ComputeFn) -> FnSignature:
         if isinstance(actor, Actor):
             return FnSignature.parse(actor.forward)
+        elif isinstance(actor, PartialFn):
+            return actor.signature
         else:
             return FnSignature.parse(actor)
 

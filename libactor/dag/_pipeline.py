@@ -17,7 +17,7 @@ from typing import (
     overload,
 )
 
-from libactor.actor import Actor, P
+from libactor.actor import Actor
 from libactor.cache.identitied_object import IdentObj
 from libactor.misc import (
     TypeConversion,
@@ -27,6 +27,7 @@ from libactor.misc import (
     typed_delayed,
 )
 from libactor.misc._type_conversion import ComposeTypeConversion, UnitTypeConversion
+from libactor.typing import P
 from tqdm import tqdm
 
 InValue = TypeVar("InValue")
