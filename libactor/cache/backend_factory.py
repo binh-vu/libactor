@@ -3,7 +3,7 @@ from __future__ import annotations
 import pickle
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from libactor.actor import Actor
 from libactor.cache.backend import MemBackend, SqliteBackend, wrap_backend
@@ -41,10 +41,12 @@ class ActorSqliteBackendFactory:
         mem_persist: Optional[Union[MemBackend, bool]] = None,
         filename: Optional[str] = None,
         log_serde_time: bool | str = False,
+        get_dbdir: Optional[Callable[[Any], Path]] = None,
     ):
         def constructor(self: Actor, func, cache_args_helper):
             backend = SqliteBackend(
-                dbfile=self.actor_dir / (filename or f"{func.__name__}.sqlite"),
+                dbfile=(self.actor_dir if get_dbdir is None else get_dbdir(self))
+                / (filename or f"{func.__name__}.sqlite"),
                 ser=pickle.dumps,
                 deser=pickle.loads,
                 compression=compression,
@@ -61,10 +63,12 @@ class ActorSqliteBackendFactory:
         mem_persist: Optional[Union[MemBackend, bool]] = None,
         filename: Optional[str] = None,
         log_serde_time: bool | str = False,
+        get_dbdir: Optional[Callable[[Any], Path]] = None,
     ):
         def constructor(self: Actor, func, cache_args_helper):
             backend = SqliteBackend(
-                dbfile=self.actor_dir / (filename or f"{func.__name__}.sqlite"),
+                dbfile=(self.actor_dir if get_dbdir is None else get_dbdir(self))
+                / (filename or f"{func.__name__}.sqlite"),
                 ser=cls.ser,
                 deser=cls.deser,
                 compression=compression,
