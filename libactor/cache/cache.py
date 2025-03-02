@@ -3,12 +3,14 @@ from __future__ import annotations
 import inspect
 import types
 from functools import partial, wraps
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional, TypeVar, cast
 
 from libactor.cache.backend import Backend
 from libactor.cache.cache_args import CacheArgsHelper, get_func_type
 from libactor.misc import identity, orjson_dumps
 from libactor.typing import ArgSer
+
+C = TypeVar("C", bound=Callable)
 
 
 def cache(
@@ -21,7 +23,7 @@ def cache(
     cache_ser_args: Optional[dict[str, ArgSer]] = None,
     disable: bool = False,
     cache_attr: str = "__cache_backends__",
-):
+) -> Callable[[C], C]:
     """A single cache decorator that can be used for both functions and instance methods.
 
     Args:
@@ -37,7 +39,7 @@ def cache(
 
     backend_factory = backend
 
-    def wrapper_fn(func: Callable):
+    def wrapper_fn(func: C) -> C:
         cache_args_helper = CacheArgsHelper.from_func(
             func, cache_ser_args=cache_ser_args
         )
@@ -72,7 +74,7 @@ def cache(
 
                 return val
 
-            return fn
+            return fn  # type: ignore
         else:
             assert func_type == "instancemethod"
 
@@ -114,6 +116,6 @@ def cache(
                 setattr(self, func.__name__, types.MethodType(update_method, self))
                 return update_method(self, *args, **kwargs)
 
-            return method
+            return method  # type: ignore
 
     return wrapper_fn
