@@ -179,6 +179,7 @@ class DAG:
             type_conversions or []
         )
         upd_type_conversions.append(cast_ident_obj)
+        upd_type_conversions.append(extract_ident_obj)
         type_service = TypeConversion(upd_type_conversions)
 
         g: RetworkXStrDiGraph[int, ActorNode, ActorEdge] = RetworkXStrDiGraph(
@@ -192,7 +193,9 @@ class DAG:
             "" not in dictmap
         ), "Empty key is not allowed as it's a reserved key for placeholder in pipeline"
         norm_dictmap: dict[ComputeFnId, Flow | ComputeFn] = {}
-        pipeline_idmap: dict[ComputeFnId, ComputeFnId] = {}
+        pipeline_idmap: dict[ComputeFnId, list[ComputeFnId]] = (
+            {}
+        )  # keep track of the pipeline id to pipe objects' ids
         for uid, flow in dictmap.items():
             if isinstance(flow, Sequence):
                 pipe_ids = []
@@ -226,12 +229,22 @@ class DAG:
                         )
                     norm_dictmap[uof_id] = new_uof
                     pipe_ids.append(uof_id)
-                pipeline_idmap[uid] = pipe_ids[len(flow) - 1]
+                pipeline_idmap[uid] = pipe_ids
             else:
                 norm_dictmap[uid] = flow
-        for uid, flow in dictmap.items():
+
+        # rewire the source of the flow to map the pipeline id to the actual id
+        for uid, flow in norm_dictmap.items():
             if isinstance(flow, Flow):
-                flow.source = [pipeline_idmap.get(s, s) for s in flow.source]
+                # we need to rewire the incoming edges of the actor if needed
+                for i, parent in enumerate(flow.source):
+                    if parent in pipeline_idmap:
+                        # refer to an actor in the pipeline, but we need to exclude the self-reference
+                        # happen because id of the first actor in the pipeline is the pipeline id
+                        if uid in pipeline_idmap[parent]:
+                            # self reference, we do not need to update
+                            continue
+                        flow.source[i] = pipeline_idmap[parent][-1]
 
         # create a graph
         for uid, uinfo in norm_dictmap.items():
@@ -265,9 +278,15 @@ class DAG:
                         ).signature.return_type
                         if flow.cardinality == Cardinality.ONE_TO_MANY:
                             source_return_type = get_args(source_return_type)[0]
-                        usig.argtypes[i], (var, nt) = align_generic_type(
-                            t, source_return_type
-                        )
+
+                        try:
+                            usig.argtypes[i], (var, nt) = align_generic_type(
+                                t, source_return_type
+                            )
+                        except Exception as e:
+                            raise TypeConversion.UnknownConversion(
+                                f"Cannot align the generic type {t} based on upstream actors for actor {uid}"
+                            )
                         var2type[var] = nt
                 if is_generic_type(usig.return_type):
                     usig.return_type = ground_generic_type(
@@ -287,7 +306,7 @@ class DAG:
                 ssig = s.signature
 
                 ssig_return_origin = get_origin(tp=ssig.return_type)
-                ssig_return_args = get_args(ssig.return_type)
+                ssig_return_args: tuple[Any, ...] = get_args(ssig.return_type)
                 cast_fn = identity
                 if (
                     ssig_return_origin is None
@@ -297,7 +316,7 @@ class DAG:
                     # we do not know how to convert this
                     if strict:
                         raise TypeConversion.UnknownConversion(
-                            f"Cannot find conversion from {ssig.return_type} to {usig.argtypes[0]}"
+                            f"Cannot find conversion from {ssig.return_type} to {usig.argtypes[0]} needed to connect actor `{s.id}` to `{u.id}`"
                         )
                 else:
                     try:
@@ -366,7 +385,7 @@ class DAG:
                     except Exception as e:
                         if strict:
                             raise TypeConversion.UnknownConversion(
-                                f"Don't know how to convert output of {sid} to input of {uid}"
+                                f"Don't know how to convert output of `{sid}` to input of `{uid}`"
                             ) from e
                     g.add_edge(
                         ActorEdge(
@@ -417,9 +436,14 @@ class DAG:
             else:
                 n_consumed_context = 0
 
-            actor2context[u.id] = tuple(
-                context[name] for name in u.required_context[n_consumed_context:]
-            )
+            try:
+                actor2context[u.id] = tuple(
+                    context[name] for name in u.required_context[n_consumed_context:]
+                )
+            except KeyError as e:
+                raise KeyError(
+                    f"Actor `{u.id}` requires context `{e.args[0]}` but it's not provided"
+                )
             inedges = self.graph.in_edges(u.id)
             if len(inedges) > 0 and inedges[0].cardinality == Cardinality.ONE_TO_MANY:
                 actor2args[u.id] = deque()
@@ -524,3 +548,7 @@ T2 = TypeVar("T2")
 
 def cast_ident_obj(obj: IdentObj[T1], func: Callable[[T1], T2]) -> IdentObj[T2]:
     return IdentObj(obj.key, func(obj.value))
+
+
+def extract_ident_obj(obj: IdentObj[T1]) -> T1:
+    return obj.value

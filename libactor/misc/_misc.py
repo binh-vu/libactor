@@ -11,12 +11,15 @@ from typing import (
     Sequence,
     Type,
     TypeVar,
+    Union,
+    get_args,
+    get_origin,
     overload,
 )
 
 import orjson
 from joblib import Parallel, delayed
-from libactor.typing import Compression, DataClassInstance, T
+from libactor.typing import Compression, DataClassInstance, NoneType, T
 from serde.helper import AVAILABLE_COMPRESSIONS
 
 TYPE_ALIASES = {"typing.List": "list", "typing.Dict": "dict", "typing.Set": "set"}
@@ -199,3 +202,19 @@ def assign_dataclass_field_names(cls: type[T]):
     assert is_dataclass(cls)
     for field in fields(cls):
         setattr(cls, field.name, field.name)
+
+
+def is_optional_type(typ: type) -> bool:
+    if get_origin(typ) is Union:
+        args = get_args(typ)
+        if any(x is NoneType for x in args):
+            return True
+    return False
+
+
+def get_optional_type(typ: Optional[T]) -> T:
+    args = get_args(typ)
+    for arg in args:
+        if arg is not NoneType:
+            return arg
+    raise Exception("Unreachable")

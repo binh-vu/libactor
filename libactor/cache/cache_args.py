@@ -42,7 +42,7 @@ class CacheArgsHelper:
 
         # add cache ser args that serialize IdentObj
         for arg, argtype in argtypes.items():
-            if argtype is not None and is_ident_obj_cls(argtype):
+            if argtype is not None and is_ident_obj_cls(argtype, optional=True):
                 assert (
                     arg not in self.cache_ser_args
                 ), f"{arg} has a default serialization. You should not attempt to set it yourself"

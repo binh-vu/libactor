@@ -3,8 +3,8 @@ from __future__ import annotations
 from functools import cached_property
 from typing import Generic, Optional, Sequence
 
-import orjson
 from libactor.actor._state import ActorState
+from libactor.misc import orjson_dumps
 from libactor.storage._global_storage import GlobalStorage
 from libactor.typing import P
 
@@ -37,7 +37,7 @@ class Actor(Generic[P]):
 
     @cached_property
     def key(self):
-        full_key = orjson.dumps(self.get_actor_state().to_dict()).decode()
+        full_key = orjson_dumps(self.get_actor_state().to_dict()).decode()
         return GlobalStorage.get_instance().shorten_key(full_key)
 
     @cached_property

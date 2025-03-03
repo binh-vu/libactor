@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Generic, TypeGuard, Union, get_origin
+from typing import Any, Generic, Optional, TypeGuard, Union, get_origin
 from uuid import uuid4
 
+from libactor.misc import get_optional_type, is_optional_type
 from libactor.typing import T
 
 
@@ -32,14 +33,18 @@ def is_ident_obj(x: Any) -> TypeGuard[Union[IdentObj, LazyIdentObj]]:
     return isinstance(x, (IdentObj, LazyIdentObj))
 
 
-def is_ident_obj_cls(x: type) -> bool:
+def is_ident_obj_cls(x: type, optional: bool = True) -> bool:
+    if optional and is_optional_type(x):
+        x = get_optional_type(x)
     uox = get_origin(x)
     if uox is None:
         uox = x
     return issubclass(uox, (IdentObj, LazyIdentObj))
 
 
-def get_ident_obj_key(x: Union[IdentObj, LazyIdentObj]) -> str:
+def get_ident_obj_key(x: Optional[Union[IdentObj, LazyIdentObj]]) -> Optional[str]:
+    if x is None:
+        return None
     return x.key
 
 
