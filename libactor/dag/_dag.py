@@ -41,21 +41,14 @@ class PartialFn:
         self.default_args = kwargs
         self.signature = FnSignature.parse(fn)
 
-        provided_args = set(self.default_args.keys())
-        idx = len(self.signature.argnames)
-        for i in range(len(self.signature.argnames) - 1, -1, -1):
-            if self.signature.argnames[i] in provided_args:
-                idx = i
-            else:
-                break
-        assert len(provided_args.intersection(self.signature.argnames[:idx])) == 0
-        self.signature.argnames = self.signature.argnames[:idx]
-        self.signature.argtypes = self.signature.argtypes[:idx]
-        for arg in self.default_args.keys():
-            self.signature.default_args.pop(arg)
+        argnames = set(self.signature.argnames)
+        for arg, val in self.default_args.items():
+            if arg not in argnames:
+                raise Exception(f"Argument {arg} is not in the function signature")
+            self.signature.default_args[arg] = val
 
     def __call__(self, *args, **kwargs):
-        return self.fn(*args, **kwargs, **self.default_args)
+        return self.fn(*args, **kwargs)
 
 
 ComputeFnId = Annotated[str, "ComputeFn Identifier"]
@@ -99,6 +92,7 @@ class ActorNode(BaseNode[ComputeFnId]):
         self.topo_index: int = 0
         self.required_args: list[str] = []
         self.required_context: list[str] = []
+        self.required_context_default_args: dict[str, Any] = {}
 
     @staticmethod
     def get_signature(actor: ComputeFn) -> FnSignature:
@@ -404,6 +398,11 @@ class DAG:
             u.required_args = usig.argnames[: len(flow.source)]
             # arguments of a compute function that are not provided by the upstream actors must be provided by the context.
             u.required_context = usig.argnames[len(flow.source) :]
+            u.required_context_default_args = {
+                k: usig.default_args[k]
+                for k in u.required_context
+                if k in usig.default_args
+            }
 
         # sort the outedges of each node in topological order
         actor2topo = {uid: i for i, uid in enumerate(topological_sort(g))}
@@ -440,7 +439,12 @@ class DAG:
 
             try:
                 actor2context[u.id] = tuple(
-                    context[name] for name in u.required_context[n_consumed_context:]
+                    (
+                        context[name]
+                        if name in context
+                        else u.required_context_default_args[name]
+                    )
+                    for name in u.required_context[n_consumed_context:]
                 )
             except KeyError as e:
                 raise KeyError(
