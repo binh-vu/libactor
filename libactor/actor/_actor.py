@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from functools import cached_property
-from typing import Generic, Optional, Sequence
+from functools import cached_property, lru_cache
+from typing import Callable, Generic, Optional, Sequence
 
 from libactor.actor._state import ActorState
-from libactor.misc import orjson_dumps
+from libactor.misc import get_classpath, orjson_dumps
 from libactor.storage._global_storage import GlobalStorage
 from libactor.typing import P
 
@@ -54,3 +54,9 @@ class Actor(Generic[P]):
         if len(self.dep_actors) == 0:
             return self.__class__, (self.params,)
         return self.__class__, (self.params, self.dep_actors)
+
+
+@lru_cache()
+def make_key(func: Callable, version: int | str, ser_args: str):
+    full_key = ":".join((get_classpath(func), str(version), ser_args))
+    return GlobalStorage.get_instance().shorten_key(full_key)
