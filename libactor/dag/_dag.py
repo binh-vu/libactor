@@ -51,6 +51,8 @@ class PartialFn:
         assert len(provided_args.intersection(self.signature.argnames[:idx])) == 0
         self.signature.argnames = self.signature.argnames[:idx]
         self.signature.argtypes = self.signature.argtypes[:idx]
+        for arg in self.default_args.keys():
+            self.signature.default_args.pop(arg)
 
     def __call__(self, *args, **kwargs):
         return self.fn(*args, **kwargs, **self.default_args)
