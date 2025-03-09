@@ -395,26 +395,30 @@ class DAG:
                         )
                     )
 
-            u.required_args = usig.argnames[: len(flow.source)]
-            # arguments of a compute function that are not provided by the upstream actors must be provided by the context.
-            u.required_context = usig.argnames[len(flow.source) :]
-            u.required_context_default_args = {
-                k: usig.default_args[k]
-                for k in u.required_context
-                if k in usig.default_args
-            }
-
-        # sort the outedges of each node in topological order
+        # postprocessing such as updating topological order, type conversion, and args/context
         actor2topo = {uid: i for i, uid in enumerate(topological_sort(g))}
         for u in g.iter_nodes():
+            # sort the outedges of each node in topological order
             u.topo_index = actor2topo[u.id]
             u.sorted_outedges = sorted(
                 g.out_edges(u.id), key=lambda x: actor2topo[x.target]
             )
             inedges = g.in_edges(u.id)
+
+            # update the type conversion
             u.type_conversions = [identity] * len(u.signature.argnames)
             for inedge in inedges:
                 u.type_conversions[inedge.argindex] = inedge.type_conversion
+
+            # update the required args and context
+            u.required_args = u.signature.argnames[: g.in_degree(u.id)]
+            # arguments of a compute function that are not provided by the upstream actors must be provided by the context.
+            u.required_context = u.signature.argnames[g.in_degree(u.id) :]
+            u.required_context_default_args = {
+                k: u.signature.default_args[k]
+                for k in u.required_context
+                if k in u.signature.default_args
+            }
 
         return DAG(g, type_service)
 
@@ -424,6 +428,9 @@ class DAG:
         output: set[str],
         context: dict[str, Callable | Any],
     ) -> dict[str, list]:
+        assert all(
+            isinstance(v, tuple) for v in input.values()
+        ), "Input must be a tuple"
         context = {k: v() if callable(v) else v for k, v in context.items()}
         actor2context = {}
         actor2args: dict[ComputeFnId, list | deque[tuple]] = {}
@@ -466,33 +473,11 @@ class DAG:
             key=lambda x: self.graph.get_node(x[0]).topo_index,
             reverse=True,
         ):
-            u = self.graph.get_node(uid)
-            result = u.invoke(args, actor2context[uid])
-            if (
-                len(u.sorted_outedges) == 1
-                and u.sorted_outedges[0].cardinality != Cardinality.ONE_TO_ONE
-            ):
-                if u.sorted_outedges[0].cardinality == Cardinality.ONE_TO_MANY:
-                    actor2args[u.sorted_outedges[0].target] = deque(
-                        (x,) for x in reversed(result)
-                    )
-                else:
-                    assert False, "Unreachable code"
-                    # assert (
-                    #     u.sorted_outedges[0].cardinality
-                    #     == SupportCardinality.MANY_TO_ONE
-                    # )
-                    # result = [result]
-                    # actor2args[outedge.target] = [(result,)]
-                stack.append(u.sorted_outedges[0].target)
+            stack.append(uid)
+            if actor2incard[u.id][0] == Cardinality.ONE_TO_MANY:
+                actor2args[uid] = deque([args])
             else:
-                for outedge in reversed(u.sorted_outedges):
-                    intup = [None] * len(
-                        self.graph.get_node(outedge.target).required_args
-                    )
-                    intup[outedge.argindex] = result
-                    actor2args[outedge.target] = intup
-                    stack.append(outedge.target)
+                actor2args[uid] = list(args)
 
         while len(stack) > 0:
             uid = stack[-1]
@@ -532,13 +517,22 @@ class DAG:
                 and u.sorted_outedges[0].cardinality == Cardinality.ONE_TO_MANY
             ):
                 actor2args[u.sorted_outedges[0].target].extend((x,) for x in result)
-                stack.append(u.sorted_outedges[0].target)
             else:
                 for outedge in reversed(u.sorted_outedges):
                     actor2args[outedge.target][outedge.argindex] = result
+
+            # only add the next actor to the stack, if all of its upstream actors have been invoked
+            # in the other words, the current actor must has the largest topological index
+            # among its upstream actors
+            for outedge in reversed(u.sorted_outedges):
+                max_topo_index = max(
+                    self.graph.get_node(inedge.source).topo_index
+                    for inedge in self.graph.in_edges(outedge.target)
+                )
+                if max_topo_index == u.topo_index:
                     stack.append(outedge.target)
 
-        return capture_output
+        return dict(capture_output)
 
     def par_process(
         self,
