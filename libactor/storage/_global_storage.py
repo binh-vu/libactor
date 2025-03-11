@@ -32,7 +32,10 @@ class GlobalStorage:
     def init(workdir: Union[Path, str], verbose: bool = True):
         if GlobalStorage.instance is not None:
             # allow calling re-initialization if the workdir is the same
-            assert GlobalStorage.instance.workdir == Path(workdir)
+            if GlobalStorage.instance.workdir != Path(workdir):
+                raise ValueError(
+                    f"Cannot reinitialize GlobalStorage with workdir: {workdir}. It is already initialized with {GlobalStorage.instance.workdir}"
+                )
         else:
             if verbose:
                 logger.info("GlobalStorage: {}", workdir)
