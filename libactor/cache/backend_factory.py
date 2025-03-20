@@ -7,6 +7,7 @@ from typing import Any, Callable, Optional, Union
 
 from libactor.actor import Actor
 from libactor.cache.backend import MemBackend, SqliteBackend, wrap_backend
+from libactor.storage import GlobalStorage
 from libactor.typing import Compression
 from typing_extensions import Self
 
@@ -15,15 +16,20 @@ class FuncSqliteBackendFactory:
 
     @staticmethod
     def pickle(
-        dbdir: Path,
+        dbdir: Path | Callable[[], Path],
         compression: Optional[Compression] = None,
         mem_persist: Optional[Union[MemBackend, bool]] = None,
         filename: Optional[str] = None,
         log_serde_time: bool | str = False,
     ):
         def constructor(func, cache_args_helper):
+            if callable(dbdir):
+                dbdir_ = dbdir()
+            else:
+                dbdir_ = dbdir
+
             backend = SqliteBackend(
-                dbfile=dbdir / (filename or f"{func.__name__}.sqlite"),
+                dbfile=dbdir_ / (filename or f"{func.__name__}.sqlite"),
                 ser=pickle.dumps,
                 deser=pickle.loads,
                 compression=compression,
@@ -89,6 +95,13 @@ def actor_mem_backend_factory(self, func, cache_args_helper):
 class FuncBackendFactory:
     sqlite = FuncSqliteBackendFactory
     mem = func_mem_backend_factory
+
+    @staticmethod
+    def workdir(func: str, version: int):
+        """Get working directory for the function."""
+        workdir = GlobalStorage.get_instance().workdir / "funcs" / f"{func}_{version}"
+        workdir.mkdir(parents=True, exist_ok=True)
+        return workdir
 
 
 class ActorBackendFactory:

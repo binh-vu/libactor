@@ -56,25 +56,43 @@ def cache(
             ).decode()
 
             if callable(backend_factory):
-                store = cast(
-                    Callable[[Callable, CacheArgsHelper], Backend], backend_factory
-                )(func, cache_args_helper)
+                _store = {}
+
+                @wraps(func)
+                def fn(*args, **kwargs):
+                    if "store" not in _store:
+                        _store["store"] = cast(
+                            Callable[[Callable, CacheArgsHelper], Backend],
+                            backend_factory,
+                        )(func, cache_args_helper)
+
+                    store = _store["store"]
+                    key = keyfn(*args, **kwargs)
+                    if store.has_key(key):
+                        return store.get(key)
+
+                    val = func(*args, **kwargs)
+                    store.set(key, val)
+
+                    return val
+
+                return fn  # type: ignore
             else:
                 assert isinstance(backend_factory, Backend)
                 store = backend_factory
 
-            @wraps(func)
-            def fn(*args, **kwargs):
-                key = keyfn(*args, **kwargs)
-                if store.has_key(key):
-                    return store.get(key)
+                @wraps(func)
+                def fn(*args, **kwargs):
+                    key = keyfn(*args, **kwargs)
+                    if store.has_key(key):
+                        return store.get(key)
 
-                val = func(*args, **kwargs)
-                store.set(key, val)
+                    val = func(*args, **kwargs)
+                    store.set(key, val)
 
-                return val
+                    return val
 
-            return fn  # type: ignore
+                return fn  # type: ignore
         else:
             assert func_type == "instancemethod"
 

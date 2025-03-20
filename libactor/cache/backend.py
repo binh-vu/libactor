@@ -76,13 +76,13 @@ class SqliteBackend(Backend):
             timeout=30,
         )
 
-    def has_key(self, key: bytes) -> bool:
+    def has_key(self, key: str) -> bool:
         return key in self.dbconn
 
-    def get(self, key: bytes) -> Any:
+    def get(self, key: str) -> Any:
         return self.deser(self.dbconn[key])
 
-    def set(self, key: bytes, value: Any) -> None:
+    def set(self, key: str, value: Any) -> None:
         self.dbconn[key] = self.ser(value)
 
     def __reduce__(self) -> str | tuple[Any, ...]:
@@ -94,16 +94,16 @@ class SqliteBackend(Backend):
 
 class MemBackend(Backend):
 
-    def __init__(self, cache_obj: Optional[dict[bytes, Any]] = None):
+    def __init__(self, cache_obj: Optional[dict[str, Any]] = None):
         self.cache_obj = cache_obj or {}
 
-    def has_key(self, key: bytes) -> bool:
+    def has_key(self, key: str) -> bool:
         return key in self.cache_obj
 
-    def get(self, key: bytes) -> Any:
+    def get(self, key: str) -> Any:
         return self.cache_obj[key]
 
-    def set(self, key: bytes, value: Any) -> None:
+    def set(self, key: str, value: Any) -> None:
         self.cache_obj[key] = value
 
     def clear(self):
