@@ -24,10 +24,14 @@ from libactor.misc import (
     TypeConversion,
     UnitTypeConversion,
     align_generic_type,
+    get_cache_object,
+    get_parallel_executor,
     ground_generic_type,
     identity,
     is_generic_type,
+    typed_delayed,
 )
+from tqdm import tqdm
 
 
 class Cardinality(enum.Enum):
@@ -426,12 +430,15 @@ class DAG:
         self,
         input: dict[ComputeFnId, tuple],
         output: set[str],
-        context: dict[str, Callable | Any],
+        context: Optional[dict | Callable[[], dict]] = None,
     ) -> dict[str, list]:
         assert all(
             isinstance(v, tuple) for v in input.values()
         ), "Input must be a tuple"
-        context = {k: v() if callable(v) else v for k, v in context.items()}
+        if context is None:
+            context = {}
+        elif callable(context):
+            context = context()
         actor2context = {}
         actor2args: dict[ComputeFnId, list | deque[tuple]] = {}
         actor2incard: dict[ComputeFnId, tuple[Cardinality, bool]] = {}
@@ -474,7 +481,7 @@ class DAG:
             reverse=True,
         ):
             stack.append(uid)
-            if actor2incard[u.id][0] == Cardinality.ONE_TO_MANY:
+            if actor2incard[uid][0] == Cardinality.ONE_TO_MANY:
                 actor2args[uid] = deque([args])
             else:
                 actor2args[uid] = list(args)
@@ -536,10 +543,36 @@ class DAG:
 
     def par_process(
         self,
-        actor_inargs: dict[ComputeFnId, tuple],
-        context: dict[str, Callable | Any],
-        capture_actors: set[str],
-    ) -> dict[str, list]: ...
+        lst_input: list[dict[ComputeFnId, tuple]],
+        output: set[str],
+        lst_context: Optional[list[Callable[[], dict] | dict]] = None,
+        n_jobs: int = -1,
+        verbose: bool = True,
+    ) -> list[dict[str, list]]:
+        if lst_context is None:
+            lst_context = [{} for _ in range(len(lst_input))]
+
+        dag_id = id(self)
+        dag_obj = self
+
+        def invoke(inp, context):
+            dag: DAG = get_cache_object(
+                dag_id,
+                dag_obj,
+            )
+            return dag.process(inp, output, context)
+
+        return list(
+            tqdm(
+                get_parallel_executor(n_jobs=n_jobs, return_as="generator")(
+                    typed_delayed(invoke)(inp, context)
+                    for inp, context in zip(lst_input, lst_context)
+                ),
+                total=len(lst_input),
+                disable=not verbose,
+                desc="dag parallel processing",
+            )
+        )
 
 
 T1 = TypeVar("T1")
