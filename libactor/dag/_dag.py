@@ -562,6 +562,19 @@ class DAG:
             )
             return dag.process(inp, output, context)
 
+        if n_jobs == 1:
+            return list(
+                tqdm(
+                    (
+                        invoke(inp, context)
+                        for inp, context in zip(lst_input, lst_context)
+                    ),
+                    total=len(lst_input),
+                    disable=not verbose,
+                    desc="dag parallel processing",
+                )
+            )
+
         return list(
             tqdm(
                 get_parallel_executor(n_jobs=n_jobs, return_as="generator")(
