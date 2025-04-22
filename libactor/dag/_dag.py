@@ -555,25 +555,23 @@ class DAG:
         dag_id = id(self)
         dag_obj = self
 
+        if n_jobs == 1:
+            out = []
+            for inp, context in tqdm(
+                zip(lst_input, lst_context),
+                total=len(lst_input),
+                disable=not verbose,
+                desc="dag parallel processing",
+            ):
+                out.append(self.process(inp, output, context))
+            return out
+
         def invoke(inp, context):
             dag: DAG = get_cache_object(
                 dag_id,
                 dag_obj,
             )
             return dag.process(inp, output, context)
-
-        if n_jobs == 1:
-            return list(
-                tqdm(
-                    (
-                        invoke(inp, context)
-                        for inp, context in zip(lst_input, lst_context)
-                    ),
-                    total=len(lst_input),
-                    disable=not verbose,
-                    desc="dag parallel processing",
-                )
-            )
 
         return list(
             tqdm(
