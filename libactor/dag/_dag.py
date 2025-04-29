@@ -24,14 +24,10 @@ from libactor.misc import (
     TypeConversion,
     UnitTypeConversion,
     align_generic_type,
-    get_cache_object,
-    get_parallel_executor,
     ground_generic_type,
     identity,
     is_generic_type,
-    typed_delayed,
 )
-from tqdm import tqdm
 
 
 class Cardinality(enum.Enum):
@@ -142,9 +138,11 @@ class DAG:
     def __init__(
         self,
         graph: RetworkXStrDiGraph[int, ActorNode, ActorEdge],
+        pipeline_idmap: dict[ComputeFnId, list[ComputeFnId]],
         type_conversion: TypeConversion,
     ) -> None:
         self.graph = graph
+        self.pipeline_idmap: dict[ComputeFnId, list[ComputeFnId]] = pipeline_idmap
         self.type_conversion = type_conversion
 
     @staticmethod
@@ -203,7 +201,7 @@ class DAG:
                     if isinstance(uof_tup, tuple):
                         uof_id, uof = uof_tup
                     else:
-                        if uof_i > 0:
+                        if uof_i < len(flow) - 1:
                             uof_id = f"{uid}:{uof_i}"
                         else:
                             uof_id = uid
@@ -424,24 +422,24 @@ class DAG:
                 if k in u.signature.default_args
             }
 
-        return DAG(g, type_service)
+        return DAG(g, pipeline_idmap, type_service)
 
     def process(
         self,
         input: dict[ComputeFnId, tuple],
         output: set[str],
-        context: Optional[dict | Callable[[], dict]] = None,
+        context: dict[str, Callable | Any],
     ) -> dict[str, list]:
         assert all(
             isinstance(v, tuple) for v in input.values()
         ), "Input must be a tuple"
-        if context is None:
-            context = {}
-        elif callable(context):
-            context = context()
+        context = {k: v() if callable(v) else v for k, v in context.items()}
         actor2context = {}
         actor2args: dict[ComputeFnId, list | deque[tuple]] = {}
         actor2incard: dict[ComputeFnId, tuple[Cardinality, bool]] = {}
+
+        # update the id of the input if it's a pipeline
+        input = {self.pipeline_idmap.get(k, [k])[0]: v for k, v in input.items()}
 
         for u in self.graph.iter_nodes():
             if u.id in input:
@@ -471,6 +469,11 @@ class DAG:
             else:
                 actor2args[u.id] = [None] * len(u.required_args)
                 actor2incard[u.id] = (Cardinality.ONE_TO_ONE, False)
+
+        # actors that are going to be invoked are the ones that are in the output or ancestors of the output
+        invoke_actor_ids = set(output)
+        for uid in output:
+            invoke_actor_ids.update((u.id for u in self.graph.ancestors(uid)))
 
         stack: list[ComputeFnId] = []
         capture_output: dict[ComputeFnId, Any] = defaultdict(list)
@@ -528,62 +531,28 @@ class DAG:
                 for outedge in reversed(u.sorted_outedges):
                     actor2args[outedge.target][outedge.argindex] = result
 
-            # only add the next actor to the stack, if all of its upstream actors have been invoked
-            # in the other words, the current actor must has the largest topological index
-            # among its upstream actors
+            # only add the next actor to the stack, if it needs to and all of its upstream actors
+            # have been invoked in the other words, the current actor must has the largest
+            # topological index among its upstream actors
             for outedge in reversed(u.sorted_outedges):
                 max_topo_index = max(
                     self.graph.get_node(inedge.source).topo_index
                     for inedge in self.graph.in_edges(outedge.target)
                 )
-                if max_topo_index == u.topo_index:
+                if (
+                    max_topo_index == u.topo_index
+                    and outedge.target in invoke_actor_ids
+                ):
                     stack.append(outedge.target)
 
         return dict(capture_output)
 
     def par_process(
         self,
-        lst_input: list[dict[ComputeFnId, tuple]],
-        output: set[str],
-        lst_context: Optional[list[Callable[[], dict] | dict]] = None,
-        n_jobs: int = -1,
-        verbose: bool = True,
-    ) -> list[dict[str, list]]:
-        if lst_context is None:
-            lst_context = [{} for _ in range(len(lst_input))]
-
-        dag_id = id(self)
-        dag_obj = self
-
-        if n_jobs == 1:
-            out = []
-            for inp, context in tqdm(
-                zip(lst_input, lst_context),
-                total=len(lst_input),
-                disable=not verbose,
-                desc="dag parallel processing",
-            ):
-                out.append(self.process(inp, output, context))
-            return out
-
-        def invoke(inp, context):
-            dag: DAG = get_cache_object(
-                dag_id,
-                dag_obj,
-            )
-            return dag.process(inp, output, context)
-
-        return list(
-            tqdm(
-                get_parallel_executor(n_jobs=n_jobs, return_as="generator")(
-                    typed_delayed(invoke)(inp, context)
-                    for inp, context in zip(lst_input, lst_context)
-                ),
-                total=len(lst_input),
-                disable=not verbose,
-                desc="dag parallel processing",
-            )
-        )
+        actor_inargs: dict[ComputeFnId, tuple],
+        context: dict[str, Callable | Any],
+        capture_actors: set[str],
+    ) -> dict[str, list]: ...
 
 
 T1 = TypeVar("T1")
