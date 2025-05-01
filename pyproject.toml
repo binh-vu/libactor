@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "libactor"
-version = "2.6.1"
+version = "2.6.2"
 description = ""
 authors = ["Binh Vu <bvu687@gmail.com>"]
 license = "MIT"

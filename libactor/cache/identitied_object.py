@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
+from itertools import chain
 from typing import Any, Generic, Optional, TypeGuard, Union, get_origin
 from uuid import uuid4
 
@@ -48,7 +49,13 @@ def get_ident_obj_key(x: Optional[Union[IdentObj, LazyIdentObj]]) -> Optional[st
     return x.key
 
 
-def fmt_keys(**kwargs: str | IdentObj) -> str:
+def fmt_keys(*args: str, **kwargs: str | IdentObj) -> str:
     return ",".join(
-        (f"{k}={v.key}" if is_ident_obj(v) else f"{k}={v}" for k, v in kwargs.items())
+        chain(
+            args,
+            (
+                f"{k}={v.key}" if is_ident_obj(x=v) else f"{k}={v}"
+                for k, v in kwargs.items()
+            ),
+        )
     )
