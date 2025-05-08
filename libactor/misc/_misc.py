@@ -171,7 +171,7 @@ def to_serde_compression(
     raise Exception(f"Not supported compression: {compression}")
 
 
-_parallel_executor = None
+_parallel_executors = {}
 _parallel_executor_objects = {}
 
 
@@ -179,10 +179,12 @@ def get_parallel_executor(
     n_jobs: int = -1,
     return_as: Literal["generator_unordered", "generator"] = "generator_unordered",
 ) -> Callable[[Iterable[T]], Iterable[T]]:
-    global _parallel_executor
-    if _parallel_executor is None:
-        _parallel_executor = Parallel(n_jobs=n_jobs, return_as=return_as)
-    return _parallel_executor  # type: ignore
+    global _parallel_executors
+    if (n_jobs, return_as) not in _parallel_executors:
+        _parallel_executors[(n_jobs, return_as)] = Parallel(
+            n_jobs=n_jobs, return_as=return_as
+        )
+    return _parallel_executors[(n_jobs, return_as)]  # type: ignore
 
 
 def typed_delayed(func: CB) -> CB:
